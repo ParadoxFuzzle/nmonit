@@ -1,0 +1,74 @@
+# nmonit Configuration
+# ======================
+# Distributed LLM Compute Cluster - Share GPU/CPU/RAM/VRAM across devices
+
+# Mode: "host" or "worker" (can also be set via CLI)
+# mode: host
+
+# ─── Host Configuration ──────────────────────────────────────────────────────
+host:
+  # Listen address for the REST API and WebSocket server
+  listen_addr: "0.0.0.0"
+
+  # Port for the REST API
+  port: 9742
+
+  # If true, route inference requests to local LiteLLM as fallback
+  route_to_local: true
+
+  # LiteLLM proxy base URL
+  litellm_base_url: "http://localhost:4000"
+
+  # LiteLLM API key (if required)
+  # litellm_api_key: "sk-..."
+
+  # Heartbeat timeout in seconds before marking a worker as offline
+  heartbeat_timeout_secs: 30
+
+  # Task timeout in seconds
+  task_timeout_secs: 300
+
+  # Max retries for failed tasks
+  max_task_retries: 3
+
+  # TLS configuration (optional)
+  # tls_enabled: false
+  # tls_cert_path: "/etc/nmonit/cert.pem"
+  # tls_key_path: "/etc/nmonit/key.pem"
+
+# ─── Worker Configuration ────────────────────────────────────────────────────
+worker:
+  # Host address to connect to
+  host_addr: "127.0.0.1"
+
+  # Host port
+  host_port: 9742
+
+  # Authentication token (must match host's expected token)
+  # auth_token: "my-secret-token"
+
+  # Worker name (defaults to hostname)
+  # name: "worker-1"
+
+  # Heartbeat interval in seconds
+  heartbeat_interval_secs: 5
+
+  # Max concurrent tasks this worker can handle
+  max_concurrent_tasks: 4
+
+  # Local LiteLLM endpoint (optional — enables local inference on worker)
+  # litellm_base_url: "http://localhost:4000"
+
+  # Whether to use local LiteLLM for inference
+  enable_local_inference: true
+
+# ─── Logging Configuration ───────────────────────────────────────────────────
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: "info"
+
+  # Log format: "plain" or "json"
+  format: "plain"
+
+  # Log file path (optional — logs to stderr if not set)
+  # file: "/var/log/nmonit/nmonit.log"

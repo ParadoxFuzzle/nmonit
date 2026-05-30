@@ -1,0 +1,28 @@
+[Unit]
+Description=nmonit Worker — Distributed LLM Compute Agent
+Documentation=https://github.com/nmonit/nmonit
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nmonit
+Group=nmonit
+ExecStart=/usr/local/bin/nmonit worker --config /etc/nmonit/nmonit.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
