@@ -1,0 +1,36 @@
+# ===== Rust =====
+target/
+*.rs.bk
+
+# ===== Go =====
+# Compiled control-plane binary
+control-plane/control-plane
+*.test
+*.out
+*.prof
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*~
+*.sublime-workspace
+*.sublime-project
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Certificates (generated) =====
+deploy/certs/*.crt
+deploy/certs/*.key
+deploy/certs/*.csr
+deploy/certs/*.srl
+
+# ===== Docker =====
+.docker/
+
+# ===== Misc =====
+*.log
+.env.local
+.env.*.local
