@@ -1,0 +1,122 @@
+[Unit]
+Description=Distributed Compute Fabric — Node Agent
+Documentation=https://github.com/compute-nmonit
+After=network-online.target containerd.service
+Wants=network-online.target
+# Requires=containerd.service   # Uncomment in Phase 2+ when executor is implemented
+
+[Service]
+Type=simple
+
+# ---- Paths & Environment ----
+# Create /etc/compute-fabric/agent.env with:
+#   CONTROL_PLANE_ADDR=http://<cp-host>:9000
+#   AGENT_TOKEN=<shared-secret>
+EnvironmentFile=-/etc/compute-fabric/agent.env
+ExecStart=/usr/local/bin/compute-agent \
+    --control-plane ${CONTROL_PLANE_ADDR:-http://localhost:9000} \
+    --data-dir ${DATA_DIR:-/var/lib/compute-agent} \
+    --log-level ${LOG_LEVEL:-info} \
+    --agent-token ${AGENT_TOKEN:-} \
+    --max-reconnect-attempts ${MAX_RECONNECT_ATTEMPTS:-10} \
+    --reconnect-backoff-secs ${RECONNECT_BACKOFF_SECS:-1}
+
+WorkingDirectory=/var/lib/compute-agent
+RuntimeDirectory=compute-agent
+StateDirectory=compute-agent
+RuntimeDirectoryPreserve=yes
+StateDirectoryPreserve=yes
+
+# ---- Lifecycle ----
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=yes
+
+# ---- User / Privileges ----
+# Create the user: useradd -r -s /usr/sbin/nologin -d /var/lib/compute-agent compute-agent
+# Add to required groups: usermod -aG video,render compute-agent  (for GPU access)
+User=compute-agent
+Group=compute-agent
+
+# Phase 1 capabilities (no containerd hook, no RDMA yet)
+AmbientCapabilities=CAP_IPC_LOCK CAP_SYS_NICE
+CapabilityBoundingSet=CAP_IPC_LOCK CAP_SYS_NICE
+
+# CAP_IPC_LOCK — hugepage + future RDMA memory registration
+# CAP_SYS_NICE  — CPU pinning / scheduling priority
+
+# Future capabilities (uncomment when needed):
+# CAP_SYS_ADMIN — containerd runtime hook cgroup operations (Phase 2+)
+# CAP_NET_RAW   — only if UCX falls back to raw sockets (unlikely with RoCE)
+
+# ---- Sandboxing ----
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+PrivateIPC=no
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=no
+SystemCallFilter=@system-service @network-io @process @io-event @ipc
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+
+# PrivateDevices=no    — agent needs /dev/nvidia*, /dev/infiniband/*
+# PrivateIPC=no        — RDMA requires shared memory / IPC
+# RemoveIPC=no         — don't remove shared memory segments on exit
+
+# ---- Device Access ----
+# Essential devices required by all processes
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/zero rw
+DeviceAllow=/dev/urandom rw
+
+# GPU devices (NVIDIA)
+DeviceAllow=/dev/nvidia* rw
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-uvm rw
+DeviceAllow=/dev/nvidia-uvm-tools rw
+
+# RDMA devices (uncomment when RDMA is enabled on the node)
+# DeviceAllow=/dev/infiniband/* rw
+
+# CPU MSR (for frequency/power readings)
+DeviceAllow=/dev/cpu/*/msr r
+
+DevicePolicy=closed
+
+# ---- Resource Limits ----
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+LimitRTPRIO=99
+TasksMax=4096
+MemoryHigh=1G
+MemoryMax=2G
+
+# LimitMEMLOCK=infinity — required for RDMA memory registration
+# MemoryHigh/MemoryMax  — adjust upward for GPU workloads
+
+# ---- Scheduling ----
+CPUSchedulingPolicy=other
+Nice=0
+
+# ---- Logging ----
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=compute-agent
+
+[Install]
+WantedBy=multi-user.target

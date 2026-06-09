@@ -45,7 +45,7 @@ Application (SDK/CLI/REST)
 - **All nodes:** Linux kernel 5.15+, systemd
 - **GPU nodes:** NVIDIA drivers 535+, NVML
 - **RDMA (optional):** RDMA-capable NICs (Mellanox ConnectX-4+, RoCE v2)
-- **Build tools:** Rust 1.78+, Go 1.22+, Protocol Buffers (buf)
+- **Build tools:** Rust 1.80+, Go 1.22+, Protocol Buffers (buf)
 
 ### Quick Start (Coming Soon)
 
@@ -108,7 +108,6 @@ make
 - [Architecture & Technology Decisions](ARCHITECTURE.md)
 - [API Reference](docs/API.md) (coming soon)
 - [Development Guide](docs/DEVELOPMENT.md) (coming soon)
-- [PRD](PRD.md) — full product requirements document
 
 ## License
 

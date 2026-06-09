@@ -1,0 +1,11 @@
+/home/noodly/Documents/Projects/nmonit/target/debug/deps/left_right-6c11a88e7432c866.d: /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/lib.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/sync.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/write.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read/guard.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read/factory.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/aliasing.rs
+
+/home/noodly/Documents/Projects/nmonit/target/debug/deps/libleft_right-6c11a88e7432c866.rmeta: /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/lib.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/sync.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/write.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read/guard.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read/factory.rs /home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/aliasing.rs
+
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/lib.rs:
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/sync.rs:
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/write.rs:
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read.rs:
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read/guard.rs:
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/read/factory.rs:
+/home/noodly/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/left-right-0.11.7/src/aliasing.rs:

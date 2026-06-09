@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package compute.v1;
 
-option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+option go_package = "github.com/compute-nmonit/control-plane/gen/compute/v1;computev1";
 
 import "compute/v1/resource.proto";
 
@@ -59,6 +59,7 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   bool acknowledged = 1;
+  uint64 sequence = 4;                     // Echo of the request sequence
   repeated PendingTask pending_tasks = 2;  // Tasks to start
   repeated string cancel_task_ids = 3;     // Tasks to kill
 }

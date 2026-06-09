@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package compute.v1;
 
-option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+option go_package = "github.com/compute-nmonit/control-plane/gen/compute/v1;computev1";
 
 import "compute/v1/agent.proto";
 

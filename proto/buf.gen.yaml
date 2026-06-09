@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/compute-nmonit/proto
+      value: github.com/compute-nmonit/control-plane/gen
 plugins:
   # Go: gRPC service stubs + message types
   - remote: buf.build/protocolbuffers/go
@@ -14,6 +14,12 @@ plugins:
     out: ../control-plane/gen
     opt:
       - paths=source_relative
-  # Rust: code is generated via tonic-build in agent/build.rs
-  # (buf remote plugins for Rust are not used — tonic-build
-  #  handles prost + tonic codegen from the same .proto files)
+  # Rust: code is generated via tonic-build in agent/build.rs, NOT via buf.
+  # This is a deliberate design choice — tonic-build handles prost + tonic
+  # codegen from the same .proto files.
+  #
+  # Code regeneration process:
+  #   1. Run `make proto`  → regenerates Go code via buf
+  #   2. Run `make agent`  → regenerates Rust code via tonic-build (build.rs)
+  #
+  # Both read from proto/compute/v1/*.proto (single source of truth).

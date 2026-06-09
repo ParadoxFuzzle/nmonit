@@ -1,0 +1,101 @@
+# Full nmonit stack — Control Plane + Prometheus + Grafana
+#
+# Usage:
+#   Development (plaintext, no TLS):
+#     docker compose up -d
+#
+#   Production (TLS + mTLS, requires certs in deploy/certs/):
+#     docker compose --profile prod up -d
+#
+#   Generate development certs first:
+#     bash scripts/gen-certs.sh deploy/certs
+#
+# Endpoints:
+#   Control plane REST:  http://localhost:8080/health
+#   Control plane gRPC:  localhost:9000
+#   Grafana:             http://localhost:3000  (admin / admin)
+#   Prometheus:          http://localhost:9090
+
+services:
+  # ---- dev profile: plaintext, debug logging ----
+  control-plane:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.control-plane
+    container_name: nmonit-control-plane
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+    command:
+      - "--grpc-addr=:9000"
+      - "--http-addr=:8080"
+      - "--log-level=debug"
+      - "--bootstrap"
+    restart: unless-stopped
+
+  # ---- prod profile: TLS + mTLS, require-tls ----
+  control-plane-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.control-plane
+    container_name: nmonit-control-plane-prod
+    networks:
+      default:
+        aliases:
+          - "control-plane"
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+    volumes:
+      - ./deploy/certs/server.crt:/certs/server.crt:ro
+      - ./deploy/certs/server.key:/certs/server.key:ro
+      - ./deploy/certs/ca.crt:/certs/ca.crt:ro
+    command:
+      - "--grpc-addr=:9000"
+      - "--http-addr=:8080"
+      - "--log-level=info"
+      - "--bootstrap"
+      - "--require-tls"
+      - "--tls-cert=/certs/server.crt"
+      - "--tls-key=/certs/server.key"
+      - "--tls-ca-cert=/certs/ca.crt"
+      - "--tls-reload-interval=30s"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: nmonit-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: nmonit-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/dashboards/nmonit.yml:/etc/grafana/provisioning/dashboards/nmonit.yml:ro
+      - ./deploy/grafana/nmonit-dashboard.json:/var/lib/grafana/dashboards/nmonit-dashboard.json:ro
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

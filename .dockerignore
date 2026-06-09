@@ -1,0 +1,47 @@
+# Only control-plane/ is needed for the Docker build — exclude everything else
+# to keep the build context small and avoid cache invalidation from irrelevant
+# file changes.
+
+# Rust crates (agent, storage, network)
+agent/
+storage/
+network/
+
+# Other Go components
+cli/
+
+# Protobuf definitions
+proto/
+
+# SDKs (C, Go, Python, Rust)
+sdk/
+
+# Frontend/UI
+dashboard/
+
+# Development scripts
+scripts/
+
+# Deployment certs (large binary files)
+deploy/certs/
+
+# Rust workspace files
+Cargo.toml
+Cargo.lock
+
+# Build tools
+Makefile
+
+# Documentation
+README.md
+ARCHITECTURE.md
+
+# Git
+.git/
+.gitignore
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~

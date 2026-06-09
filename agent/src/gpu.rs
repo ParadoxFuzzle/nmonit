@@ -1,9 +1,27 @@
+use crate::Args;
 /// GPU discovery and utilization.
 ///
 /// Uses NVIDIA NVML (via nvml-wrapper) for NVIDIA GPUs.
 /// AMD and Intel GPU support will be added in future versions.
 use crate::compute::v1::{GpuResources, GpuUtilization};
-use crate::Args;
+use std::sync::OnceLock;
+
+/// Lazily-initialized NVML instance, created once and reused.
+static NVML: OnceLock<Option<nvml_wrapper::Nvml>> = OnceLock::new();
+
+fn get_nvml() -> Option<&'static nvml_wrapper::Nvml> {
+    NVML.get_or_init(|| match nvml_wrapper::Nvml::init() {
+        Ok(nvml) => {
+            tracing::debug!("NVML initialized successfully");
+            Some(nvml)
+        }
+        Err(e) => {
+            tracing::debug!("NVML initialization failed: {e}");
+            None
+        }
+    })
+    .as_ref()
+}
 
 /// Discover all GPUs available on this node.
 pub async fn discover_gpus(args: &Args) -> anyhow::Result<Vec<GpuResources>> {
@@ -21,7 +39,7 @@ pub async fn discover_gpus(args: &Args) -> anyhow::Result<Vec<GpuResources>> {
         return Ok(gpus);
     }
 
-    let gpus = discover_nvidia_gpus().await;
+    let gpus = discover_nvidia_gpus();
     if gpus.is_empty() {
         tracing::debug!("no NVIDIA GPUs found on this node");
     }
@@ -29,13 +47,10 @@ pub async fn discover_gpus(args: &Args) -> anyhow::Result<Vec<GpuResources>> {
 }
 
 /// Probe NVIDIA GPUs using NVML.
-async fn discover_nvidia_gpus() -> Vec<GpuResources> {
-    let nvml = match nvml_wrapper::Nvml::init() {
-        Ok(nvml) => nvml,
-        Err(e) => {
-            tracing::debug!("NVML initialization failed: {e}");
-            return vec![];
-        }
+fn discover_nvidia_gpus() -> Vec<GpuResources> {
+    let nvml = match get_nvml() {
+        Some(nvml) => nvml,
+        None => return vec![],
     };
 
     let device_count = match nvml.device_count() {
@@ -57,7 +72,9 @@ async fn discover_nvidia_gpus() -> Vec<GpuResources> {
             }
         };
 
-        let name = device.name().unwrap_or_else(|_| "Unknown NVIDIA GPU".into());
+        let name = device
+            .name()
+            .unwrap_or_else(|_| "Unknown NVIDIA GPU".into());
         let mem_info = match device.memory_info() {
             Ok(m) => m,
             Err(e) => {
@@ -80,9 +97,9 @@ async fn discover_nvidia_gpus() -> Vec<GpuResources> {
 
 /// Collect current GPU utilization for heartbeat reporting.
 pub fn collect_gpu_utilization() -> Vec<GpuUtilization> {
-    let nvml = match nvml_wrapper::Nvml::init() {
-        Ok(nvml) => nvml,
-        Err(_) => return vec![],
+    let nvml = match get_nvml() {
+        Some(nvml) => nvml,
+        None => return vec![],
     };
 
     let device_count = match nvml.device_count() {
