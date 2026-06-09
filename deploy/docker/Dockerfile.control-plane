@@ -1,0 +1,27 @@
+# Multi-stage Dockerfile for the control plane
+FROM golang:1.22-bookworm AS builder
+
+WORKDIR /build
+
+# Copy Go module files
+COPY control-plane/go.mod control-plane/go.sum ./
+RUN go mod download
+
+# Copy proto definitions and generated code
+COPY proto proto/
+COPY control-plane/gen gen/
+
+# Copy source
+COPY control-plane/cmd cmd/
+COPY control-plane/internal internal/
+
+RUN CGO_ENABLED=0 go build -o control-plane ./cmd/control-plane
+
+# Runtime stage
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /build/control-plane /control-plane
+
+EXPOSE 9000 8080 9001
+
+ENTRYPOINT ["/control-plane"]

@@ -1,0 +1,38 @@
+# Rust
+target/
+*.rs.bk
+*.pdb
+
+# Go
+control-plane/gen/
+control-plane/go.sum
+cli/go.sum
+*.exe
+*.test
+
+# Build artifacts
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Generated protobuf code (agent uses tonic-build at compile time)
+agent/gen/
+
+# Temporary files
+/tmp/

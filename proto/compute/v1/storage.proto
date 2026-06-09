@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package compute.v1;
+
+option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+
+// StorageService handles distributed filesystem operations.
+service StorageService {
+  // Create a new dataset.
+  rpc CreateDataset(CreateDatasetRequest) returns (CreateDatasetResponse);
+
+  // List available datasets.
+  rpc ListDatasets(ListDatasetsRequest) returns (ListDatasetsResponse);
+
+  // Get dataset replication status.
+  rpc GetDatasetStatus(GetDatasetStatusRequest) returns (GetDatasetStatusResponse);
+}
+
+message CreateDatasetRequest {
+  string name = 1;
+  uint64 size_bytes = 2;
+  ReplicationPolicy replication = 3;
+  string tenant_id = 4;
+}
+
+message ReplicationPolicy {
+  enum Mode {
+    SYNCHRONOUS = 0;
+    ASYNCHRONOUS = 1;
+    ERASURE_CODED = 2;
+  }
+  Mode mode = 1;
+  int32 replication_factor = 2;
+}
+
+message CreateDatasetResponse {
+  bool success = 1;
+  string dataset_id = 2;
+  string error = 3;
+}
+
+message ListDatasetsRequest {
+  string tenant_id = 1;
+}
+
+message ListDatasetsResponse {
+  repeated DatasetInfo datasets = 1;
+}
+
+message DatasetInfo {
+  string dataset_id = 1;
+  string name = 2;
+  uint64 size_bytes = 3;
+  ReplicationPolicy replication = 4;
+  repeated string nodes = 5;
+}
+
+message GetDatasetStatusRequest {
+  string dataset_id = 1;
+}
+
+message GetDatasetStatusResponse {
+  DatasetInfo info = 1;
+  int64 read_iops = 2;
+  int64 write_iops = 3;
+  string current_tier = 4;
+}

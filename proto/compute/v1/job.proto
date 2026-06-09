@@ -1,0 +1,206 @@
+syntax = "proto3";
+
+package compute.v1;
+
+option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+
+import "compute/v1/resource.proto";
+import "compute/v1/agent.proto";
+
+// JobService is the public API for submitting and managing jobs.
+service JobService {
+  // Submit a new job.
+  rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
+
+  // Get the current status of a job.
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+
+  // List all jobs, optionally filtered by tenant/status.
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+
+  // Cancel a running or queued job.
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+
+  // Stream logs from a job (server-sent events / streaming gRPC).
+  rpc StreamLogs(StreamLogsRequest) returns (stream LogEntry);
+
+  // Get detailed job metrics.
+  rpc GetJobMetrics(GetJobMetricsRequest) returns (GetJobMetricsResponse);
+}
+
+message SubmitJobRequest {
+  string name = 1;
+  string tenant_id = 2;
+  string container_image = 3;       // OCI image reference
+  repeated string command = 4;      // Override entrypoint
+  map<string, string> env = 5;
+  ResourceRequirements requirements = 6;
+  JobType type = 7;
+
+  // For DAG jobs: define the task graph.
+  DAGSpec dag = 8;
+
+  // Checkpoint configuration.
+  CheckpointConfig checkpoint = 9;
+
+  // Retry policy.
+  RetryPolicy retry_policy = 10;
+}
+
+enum JobType {
+  JOB_TYPE_UNKNOWN = 0;
+  JOB_TYPE_SIMPLE = 1;             // Single task or N identical replicas
+  JOB_TYPE_DAG = 2;                // Directed acyclic graph of tasks
+  JOB_TYPE_GANG = 3;               // All-or-nothing scheduling
+  JOB_TYPE_SERVICE = 4;            // Long-running service
+}
+
+message DAGSpec {
+  repeated DAGTask tasks = 1;
+  repeated DAGEdge edges = 2;
+}
+
+message DAGTask {
+  string task_id = 1;
+  string name = 2;
+  string container_image = 3;
+  repeated string command = 4;
+  ResourceRequirements requirements = 5;
+}
+
+message DAGEdge {
+  string from_task = 1;
+  string to_task = 2;
+}
+
+message CheckpointConfig {
+  bool enabled = 1;
+  int64 interval_seconds = 2;       // How often to checkpoint
+  string storage_path = 3;          // Where to store checkpoints
+  bool incremental = 4;             // Only save changed pages
+  bool transparent = 5;             // CRIU-style transparent checkpointing
+}
+
+message RetryPolicy {
+  int32 max_retries = 1;            // -1 = unlimited
+  int64 initial_backoff_ms = 2;
+  int64 max_backoff_ms = 3;
+  double backoff_multiplier = 4;
+  bool retry_on_infrastructure_failure = 5;
+  bool retry_on_application_error = 6;
+}
+
+message SubmitJobResponse {
+  bool accepted = 1;
+  string job_id = 2;
+  string error = 3;
+  // Estimated wait time if queued
+  int64 estimated_wait_ms = 4;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message GetJobResponse {
+  Job job = 1;
+}
+
+message ListJobsRequest {
+  string tenant_id = 1;             // "" = all tenants (admin only)
+  repeated JobState states = 2;     // Filter by state
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  string next_page_token = 2;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+  string reason = 2;
+}
+
+message CancelJobResponse {
+  bool success = 1;
+}
+
+message Job {
+  string job_id = 1;
+  string name = 2;
+  string tenant_id = 3;
+  JobState state = 4;
+  JobType type = 5;
+  string container_image = 6;
+  ResourceRequirements requirements = 7;
+  repeated Task tasks = 8;          // Individual task replicas
+  int64 created_at_ns = 9;
+  int64 started_at_ns = 10;
+  int64 finished_at_ns = 11;
+  string error_message = 12;
+  int32 retry_count = 13;
+  CheckpointConfig checkpoint = 14;
+}
+
+enum JobState {
+  JOB_STATE_UNKNOWN = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_SCHEDULING = 2;
+  JOB_STATE_RUNNING = 3;
+  JOB_STATE_COMPLETED = 4;
+  JOB_STATE_FAILED = 5;
+  JOB_STATE_CANCELLED = 6;
+  JOB_STATE_PREEMPTED = 7;         // Waiting to resume
+}
+
+message Task {
+  string task_id = 1;
+  string job_id = 2;
+  string node_id = 3;               // Node this task runs on
+  TaskState state = 5;
+  int32 replica_index = 6;
+  ResourceUtilization utilization = 7;
+  int64 started_at_ns = 8;
+  int64 finished_at_ns = 9;
+  string error_message = 10;
+  string logs_url = 11;
+}
+
+message StreamLogsRequest {
+  string job_id = 1;
+  string task_id = 2;               // "" = all tasks
+  bool follow = 3;                  // Keep streaming new logs
+  int64 tail_lines = 4;             // Last N lines
+}
+
+message LogEntry {
+  string task_id = 1;
+  string node_id = 2;
+  int64 timestamp_ns = 3;
+  string stream = 4;                // "stdout" or "stderr"
+  string message = 5;
+}
+
+message GetJobMetricsRequest {
+  string job_id = 1;
+  int64 start_time_ns = 2;
+  int64 end_time_ns = 3;
+}
+
+message GetJobMetricsResponse {
+  string job_id = 1;
+  repeated MetricSeries series = 2;
+}
+
+message MetricSeries {
+  string name = 1;                  // e.g. "cpu_usage", "memory_bytes"
+  string task_id = 2;
+  repeated MetricPoint points = 3;
+}
+
+message MetricPoint {
+  int64 timestamp_ns = 1;
+  double value = 2;
+}

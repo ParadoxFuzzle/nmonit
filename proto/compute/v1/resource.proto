@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package compute.v1;
+
+option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+
+// --- Node Hardware ---
+
+message NodeResources {
+  string node_id = 1;
+  string hostname = 2;
+  CpuResources cpu = 3;
+  MemoryResources memory = 4;
+  repeated GpuResources gpus = 5;
+  StorageResources storage = 6;
+  NetworkResources network = 7;
+  repeated Capability capabilities = 8;
+  string kernel_version = 9;
+  string os_release = 10;
+}
+
+message CpuResources {
+  int32 physical_cores = 1;
+  int32 logical_cores = 2;          // With hyperthreading
+  string architecture = 3;          // x86_64, aarch64
+  string model_name = 4;            // e.g. "Intel(R) Xeon(R) Gold 6342"
+  int64 frequency_mhz = 5;          // Base frequency
+  int64 max_frequency_mhz = 6;      // Turbo frequency
+  repeated NumaNode numa_nodes = 7;
+}
+
+message NumaNode {
+  int32 id = 1;
+  repeated int32 core_ids = 2;      // Logical cores in this NUMA node
+  uint64 memory_bytes = 3;          // RAM attached to this NUMA node
+}
+
+message MemoryResources {
+  uint64 total_bytes = 1;
+  uint64 hugepage_2mb_count = 2;
+  uint64 hugepage_1gb_count = 3;
+  int64 speed_mhz = 4;              // DDR speed
+  string type = 5;                  // DDR4, DDR5, HBM2e, etc.
+  repeated MemoryTier tiers = 6;
+}
+
+message MemoryTier {
+  string name = 1;                  // "local_ram", "local_nvme", "network"
+  uint64 total_bytes = 2;
+  uint64 available_bytes = 3;
+  int64 latency_ns = 4;             // Approximate access latency
+  int64 bandwidth_mbps = 5;         // Approximate bandwidth
+}
+
+message GpuResources {
+  int32 index = 1;                  // Device index on this node
+  string vendor = 2;                // "nvidia", "amd", "intel"
+  string model = 3;                 // "RTX 4090", "MI300X"
+  string architecture = 4;          // "Ada Lovelace", "CDNA3"
+  int32 architecture_generation = 5; // For capability comparison (e.g. >= Ampere)
+  uint64 vram_bytes = 6;
+  string compute_capability = 7;    // "8.9" for NVIDIA, gfx version for AMD
+  repeated GpuCapability capabilities = 8;
+  int32 multiprocessor_count = 9;   // SM count (NVIDIA) or CU count (AMD)
+  int64 max_clock_mhz = 10;
+  int64 memory_clock_mhz = 11;
+  int32 memory_bus_width_bits = 12;
+  int64 memory_bandwidth_mbps = 13;
+  int32 pcie_generation = 14;       // 3, 4, 5
+  int32 pcie_width = 15;            // x8, x16
+  int32 nvlink_count = 16;          // Number of NVLink bridges
+  int64 nvlink_bandwidth_mbps = 17;
+  bool supports_gpudirect_rdma = 18;
+  bool supports_mig = 19;           // Multi-Instance GPU (NVIDIA)
+  bool supports_sriov = 20;         // SR-IOV (AMD)
+}
+
+message GpuCapability {
+  enum Cap {
+    FP64 = 0;
+    FP32 = 1;
+    FP16 = 2;
+    BF16 = 3;
+    INT8 = 4;
+    INT4 = 5;
+    TF32 = 6;                       // NVIDIA Ampere+
+    FP8 = 7;                        // NVIDIA Hopper+
+  }
+  Cap cap = 1;
+  bool supported = 2;
+  int64 tflops = 3;                 // Peak throughput for this precision
+}
+
+message StorageResources {
+  repeated StorageDevice devices = 1;
+}
+
+message StorageDevice {
+  string path = 1;                  // Mount point
+  string type = 2;                  // "nvme", "ssd", "hdd"
+  string filesystem = 3;            // "ext4", "xfs", "zfs"
+  uint64 total_bytes = 4;
+  uint64 available_bytes = 5;
+  int64 read_iops = 6;
+  int64 write_iops = 7;
+  int64 read_throughput_mbps = 8;
+  int64 write_throughput_mbps = 9;
+}
+
+message NetworkResources {
+  repeated NetworkInterface interfaces = 1;
+  int64 total_bandwidth_mbps = 2;   // Aggregate across all interfaces
+}
+
+message NetworkInterface {
+  string name = 1;                  // "eth0", "ib0", "mlx5_0"
+  string driver = 2;                // "mlx5_core", "i40e"
+  string mac_address = 3;
+  repeated string ip_addresses = 4;
+  int64 speed_mbps = 5;             // Link speed
+  bool supports_rdma = 6;
+  bool supports_roce = 7;
+  bool supports_infiniband = 8;
+  string pci_address = 9;
+  int32 numa_node = 10;             // NUMA node this NIC is attached to
+}
+
+// --- Capability Labels ---
+
+message Capability {
+  string key = 1;                   // e.g. "gpu.arch.generation", "cpu.feature"
+  string value = 2;                 // e.g. "8", "avx512"
+}
+
+// --- Utilization (current usage) ---
+
+message NodeUtilization {
+  string node_id = 1;
+  uint64 timestamp_ns = 2;
+  CpuUtilization cpu = 3;
+  MemoryUtilization memory = 4;
+  repeated GpuUtilization gpus = 5;
+  StorageUtilization storage = 6;
+  NetworkUtilization network = 7;
+}
+
+message CpuUtilization {
+  double overall_percent = 1;       // 0.0 - 100.0
+  repeated double per_core_percent = 2;
+  double load_1m = 3;
+  double load_5m = 4;
+  double load_15m = 5;
+}
+
+message MemoryUtilization {
+  uint64 used_bytes = 1;
+  uint64 available_bytes = 2;
+  uint64 hugepage_2mb_used = 3;
+  uint64 hugepage_1gb_used = 4;
+}
+
+message GpuUtilization {
+  int32 index = 1;
+  double gpu_percent = 2;           // SM utilization
+  double memory_percent = 3;        // VRAM utilization
+  uint64 vram_used_bytes = 4;
+  uint64 vram_total_bytes = 5;
+  int32 temperature_celsius = 6;
+  int64 power_draw_watts = 7;
+  int64 power_limit_watts = 8;
+  int64 clock_mhz = 9;
+  int64 memory_clock_mhz = 10;
+  double pcie_tx_mbps = 11;
+  double pcie_rx_mbps = 12;
+  double nvlink_tx_mbps = 13;
+  double nvlink_rx_mbps = 14;
+  // Running processes on this GPU
+  repeated GpuProcess processes = 15;
+}
+
+message GpuProcess {
+  int32 pid = 1;
+  string name = 2;
+  uint64 vram_used_bytes = 3;
+}
+
+message StorageUtilization {
+  repeated StorageDeviceUtilization devices = 1;
+}
+
+message StorageDeviceUtilization {
+  string path = 1;
+  uint64 used_bytes = 2;
+  int64 read_iops_current = 3;
+  int64 write_iops_current = 4;
+  int64 read_throughput_mbps_current = 5;
+  int64 write_throughput_mbps_current = 6;
+}
+
+message NetworkUtilization {
+  repeated NetworkInterfaceUtilization interfaces = 1;
+}
+
+message NetworkInterfaceUtilization {
+  string name = 1;
+  int64 rx_mbps = 2;
+  int64 tx_mbps = 3;
+  int64 rx_packets_per_sec = 4;
+  int64 tx_packets_per_sec = 5;
+  int64 rx_errors = 6;
+  int64 tx_errors = 7;
+  int64 rdma_rx_mbps = 8;
+  int64 rdma_tx_mbps = 9;
+}
+
+// --- Resource Requirements (for jobs/tasks) ---
+
+message ResourceRequirements {
+  float cpu_cores = 1;              // Fractional CPU (e.g. 0.5 = half a core)
+  uint64 memory_bytes = 2;          // RAM required
+  repeated GpuRequirement gpus = 3; // GPU requirements
+  uint64 storage_bytes = 4;         // Ephemeral storage
+  int32 replicas = 5;               // Number of task replicas
+  int32 priority = 6;               // Higher = more important (0-100)
+  repeated AffinityRule affinity = 7;
+  bool preemptible = 8;             // Can this job be preempted?
+}
+
+message GpuRequirement {
+  int32 count = 1;                  // How many GPUs
+  uint64 vram_bytes = 2;            // VRAM per GPU
+  repeated GpuCapability.Cap required_capabilities = 3;
+  int32 min_architecture_generation = 4;
+  string vendor = 5;                // "" = any vendor
+  bool allow_spilling = 6;          // Allow VRAM-to-RAM eviction
+}
+
+message AffinityRule {
+  enum Type {
+    SAME_NODE_AS_DATA = 0;
+    SAME_NODE_AS_SERVICE = 1;
+    DIFFERENT_NODE_THAN_SERVICE = 2;
+    SAME_RACK = 3;
+    SAME_SWITCH = 4;
+  }
+  Type type = 1;
+  string target = 2;                // Dataset ID, service name, etc.
+  bool required = 3;                // Hard constraint (fail if can't satisfy) vs soft preference
+}
+
+// --- Generic Resource Utilization (used by job.proto and agent.proto) ---
+
+message ResourceUtilization {
+  double cpu_percent = 1;
+  uint64 memory_bytes = 2;
+  uint64 gpu_vram_bytes = 3;
+  double gpu_percent = 4;
+  uint64 disk_bytes = 5;
+  int64 network_rx_mbps = 6;
+  int64 network_tx_mbps = 7;
+}

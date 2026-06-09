@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package compute.v1;
+
+option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+
+// ControlService is used for inter-control-plane communication
+// (Raft log replication, leader election, cluster membership).
+service ControlService {
+  // Raft RPCs are handled by hashicorp/raft via its own transport;
+  // this service is reserved for custom control-plane-level messages.
+  rpc GetClusterState(GetClusterStateRequest) returns (GetClusterStateResponse);
+  rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse);
+}
+
+message GetClusterStateRequest {}
+
+message GetClusterStateResponse {
+  string leader_id = 1;
+  repeated string member_ids = 2;
+  ClusterResourceSummary resources = 3;
+}
+
+message ClusterResourceSummary {
+  int32 node_count = 1;
+  int32 total_cpu_cores = 2;
+  uint64 total_ram_bytes = 3;
+  int32 total_gpu_count = 4;
+  uint64 total_vram_bytes = 5;
+  int32 online_node_count = 6;
+}
+
+message JoinClusterRequest {
+  string node_id = 1;
+  string raft_address = 2;
+}
+
+message JoinClusterResponse {
+  bool accepted = 1;
+  string leader_address = 2;
+}

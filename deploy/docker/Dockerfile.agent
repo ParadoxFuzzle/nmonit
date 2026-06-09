@@ -1,0 +1,47 @@
+# Multi-stage Dockerfile for the compute node agent
+FROM rust:1.78-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy workspace-level Cargo files for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY agent/Cargo.toml agent/build.rs agent/
+COPY network/Cargo.toml network/
+COPY storage/Cargo.toml storage/
+COPY sdk/rust/Cargo.toml sdk/rust/
+COPY proto proto/
+
+# Build dependencies only (with dummy source files)
+RUN mkdir -p agent/src network/src storage/src sdk/rust/src && \
+    echo 'fn main() {}' > agent/src/main.rs && \
+    echo '' > network/src/lib.rs && \
+    echo '' > storage/src/lib.rs && \
+    echo '' > sdk/rust/src/lib.rs && \
+    cargo build --release -p compute-agent && \
+    rm -rf agent/src network/src storage/src sdk/rust/src
+
+# Copy real source and build
+COPY agent/src agent/src
+COPY network/src network/src
+COPY storage/src storage/src
+COPY sdk/rust/src sdk/rust/src
+
+RUN touch agent/src/main.rs && cargo build --release -p compute-agent
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libnvidia-ml1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/compute-agent /usr/local/bin/compute-agent
+
+ENTRYPOINT ["compute-agent"]

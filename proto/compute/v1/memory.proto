@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package compute.v1;
+
+option go_package = "github.com/compute-nmonit/proto/compute/v1;computev1";
+
+import "compute/v1/agent.proto";
+
+// MemoryService handles distributed memory operations
+// that span multiple nodes (allocation, migration, tiering).
+service MemoryService {
+  // Allocate distributed memory across the cluster.
+  rpc AllocateDistributed(DistributedAllocRequest) returns (DistributedAllocResponse);
+
+  // Migrate a memory region to a different node (or tier).
+  rpc MigrateRegion(MigrateRegionRequest) returns (MigrateRegionResponse);
+
+  // Get info about a memory region.
+  rpc GetRegion(GetRegionRequest) returns (GetRegionResponse);
+}
+
+message DistributedAllocRequest {
+  uint64 size_bytes = 1;
+  ConsistencyMode.Mode consistency = 2;
+  bool use_hugepages = 3;
+  int32 replication_factor = 4;
+  string tenant_id = 5;
+}
+
+message DistributedAllocResponse {
+  bool success = 1;
+  string allocation_id = 2;
+  repeated MemoryHandle handles = 3;
+  string error = 4;
+}
+
+message MigrateRegionRequest {
+  string allocation_id = 1;
+  string target_node_id = 2;
+  string target_tier = 3; // "ram", "nvme", "ssd"
+}
+
+message MigrateRegionResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message GetRegionRequest {
+  string allocation_id = 1;
+}
+
+message GetRegionResponse {
+  string allocation_id = 1;
+  uint64 size_bytes = 2;
+  ConsistencyMode.Mode consistency = 3;
+  repeated MemoryHandle handles = 4;
+  int64 access_count = 5;
+  string current_tier = 6;
+}
