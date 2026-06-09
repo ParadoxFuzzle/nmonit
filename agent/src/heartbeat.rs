@@ -82,7 +82,10 @@ impl HeartbeatManager {
             tonic::transport::Endpoint::from_shared(control_plane_addr.clone())
                 .context("invalid control plane address")?
                 .connect_timeout(std::time::Duration::from_secs(5))
-                .timeout(std::time::Duration::from_secs(10));
+                .timeout(std::time::Duration::from_secs(10))
+                .keep_alive_while_idle(true)
+                .http2_keep_alive_interval(std::time::Duration::from_secs(10))
+                .keep_alive_timeout(std::time::Duration::from_secs(5));
 
         let channel = endpoint
             .connect()
@@ -124,13 +127,28 @@ impl HeartbeatManager {
         let (request_tx, request_rx) = mpsc::channel::<HeartbeatRequest>(16);
         let request_stream = ReceiverStream::new(request_rx);
 
-        let mut response_stream = client
+        let response = client
             .heartbeat(request_stream)
             .await
-            .context("failed to open heartbeat stream")?
-            .into_inner();
+            .context("failed to open heartbeat stream")?;
+
+        let mut response_stream = response.into_inner();
 
         let (instruction_tx, instruction_rx) = mpsc::unbounded_channel();
+
+        // Spawn a task to send the initial heartbeat immediately after stream is open
+        let init_tx = request_tx.clone();
+        let nid = node_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let init_req = HeartbeatRequest {
+                node_id: nid,
+                sequence: 0,
+                utilization: None,
+                tasks: vec![],
+            };
+            let _ = init_tx.send(init_req).await;
+        });
 
         // --- Step 3: Spawn background reader for responses ---
         let nid = node_id.clone();
