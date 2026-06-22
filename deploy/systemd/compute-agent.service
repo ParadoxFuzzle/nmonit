@@ -1,6 +1,6 @@
 [Unit]
 Description=Distributed Compute Fabric — Node Agent
-Documentation=https://github.com/compute-nmonit
+Documentation=https://github.com/ParadoxFuzzle/nmonit
 After=network-online.target containerd.service
 Wants=network-online.target
 # Requires=containerd.service   # Uncomment in Phase 2+ when executor is implemented
@@ -15,7 +15,6 @@ Type=simple
 EnvironmentFile=-/etc/compute-fabric/agent.env
 ExecStart=/usr/local/bin/compute-agent \
     --control-plane ${CONTROL_PLANE_ADDR:-http://localhost:9000} \
-    --data-dir ${DATA_DIR:-/var/lib/compute-agent} \
     --log-level ${LOG_LEVEL:-info} \
     --agent-token ${AGENT_TOKEN:-} \
     --max-reconnect-attempts ${MAX_RECONNECT_ATTEMPTS:-10} \

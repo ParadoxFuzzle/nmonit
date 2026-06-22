@@ -1,6 +1,6 @@
 [Unit]
 Description=Distributed Compute Fabric — Control Plane
-Documentation=https://github.com/compute-nmonit
+Documentation=https://github.com/ParadoxFuzzle/nmonit
 After=network-online.target
 Wants=network-online.target
 
