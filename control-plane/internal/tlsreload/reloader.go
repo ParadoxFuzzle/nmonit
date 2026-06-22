@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/compute-nmonit/control-plane/internal/metrics"
+	"github.com/ParadoxFuzzle/control-plane/internal/metrics"
 	"github.com/rs/zerolog/log"
 )
 

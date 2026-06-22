@@ -14,19 +14,19 @@ import (
 
 // Bounds for string identifiers and numeric fields.
 const (
-	MaxNodeIDLen      = 255
-	MaxTaskIDLen      = 255
-	MaxJobIDLen       = 255
-	MaxAllocationIDLen = 255
+	MaxNodeIDLen         = 255
+	MaxTaskIDLen         = 255
+	MaxJobIDLen          = 255
+	MaxAllocationIDLen   = 255
 	MaxContainerImageLen = 1024
-	MaxCommandLen     = 256 * 1024   // 256KB total command+args
-	MaxEnvKeyLen      = 128
-	MaxEnvValueLen    = 4096
-	MaxEnvCount       = 128
-	MaxMemoryBytes    = 1 << 40      // 1 TB
-	MaxGPUMemBytes    = 256 << 30    // 256 GB
-	MaxReplicas       = 100
-	MaxPriority       = 100
+	MaxCommandLen        = 256 * 1024 // 256KB total command+args
+	MaxEnvKeyLen         = 128
+	MaxEnvValueLen       = 4096
+	MaxEnvCount          = 128
+	MaxMemoryBytes       = 1 << 40   // 1 TB
+	MaxGPUMemBytes       = 256 << 30 // 256 GB
+	MaxReplicas          = 100
+	MaxPriority          = 100
 	MaxTasksPerHeartbeat = 10000
 )
 
