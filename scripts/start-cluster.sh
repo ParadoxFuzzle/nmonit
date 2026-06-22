@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start the compute-nmonit cluster: control plane on host, agent on Jetson
+# Start the nmonit cluster: control plane on host, agent on Jetson
 
 set -e
 
