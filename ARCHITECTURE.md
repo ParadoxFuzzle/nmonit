@@ -122,7 +122,7 @@ service AgentService {
 ```
 ### Other gRPC Services (proto-defined; not currently registered) — `[Phase 2+]`
 
-> Beyond `AgentService` (callable end-to-end today — see its preamble above) and the REST surface wired to `/api/v1/nodes` + `/health` + `/metrics`, four more gRPC services are fully defined in `proto/compute/v1/{job,memory,storage,control}.proto`. None of their 14 RPCs are currently registered, so callers can't reach them end-to-end. Readers searching for `MemoryService.AllocateDistributed` should note it is *conceptually distinct* from `AgentService.AllocateMemory`: the agent-side RPC currently returns a stub `MemoryHandle` (see the Distributed Memory Allocation data flow); a real cluster-wide allocation via `MemoryService.AllocateDistributed` does not yet exist. REST endpoints above cover a subset of these operations; this paragraph is the canonical "what proto contracts exist but aren't wired" pointer.
+> Beyond `AgentService` (callable end-to-end — see its preamble above) and the REST surface wired to `/api/v1/nodes` + `/health` + `/metrics`, four more gRPC services are fully defined in `proto/compute/v1/{job,memory,storage,control}.proto`. None of their 14 RPCs are currently registered, so callers can't reach them end-to-end. Readers searching for `MemoryService.AllocateDistributed` should note it is *conceptually distinct* from `AgentService.AllocateMemory`: the agent-side RPC currently returns a stub `MemoryHandle` (see the Distributed Memory Allocation data flow); a real cluster-wide allocation via `MemoryService.AllocateDistributed` does not yet exist. REST endpoints above cover a subset of these operations; this paragraph is the canonical "what proto contracts exist but aren't wired" pointer.
 >
 > - **`[Phase 2+]` `JobService`** (`proto/compute/v1/job.proto`): `SubmitJob`, `GetJob`, `ListJobs`, `CancelJob`, `StreamLogs`, `GetJobMetrics`.
 > - **`[Phase 2+]` `MemoryService`** (`proto/compute/v1/memory.proto`): `AllocateDistributed`, `MigrateRegion`, `GetRegion`.
@@ -131,7 +131,7 @@ service AgentService {
 
 ### Client API (REST + gRPC)
 
-> Phase coverage reflects what `control-plane/internal/restapi/` actually serves today (only `/health`, `/api/v1/nodes`, `/metrics`). Routes under `/api/v1/jobs`, `/api/v1/resources`, `/api/v1/allocations` are part of the `JobService` and `MemoryService` proto definitions (`proto/compute/v1/{job,memory}.proto`), but neither service is currently registered (so they're not callable end-to-end even though the contract exists).
+> Phase coverage reflects what `control-plane/internal/restapi/` actually serves (only `/health`, `/api/v1/nodes`, `/metrics`). Routes under `/api/v1/jobs`, `/api/v1/resources`, `/api/v1/allocations` are part of the `JobService` and `MemoryService` proto definitions (`proto/compute/v1/{job,memory}.proto`), but neither service is currently registered (so they're not callable end-to-end even though the contract exists).
 
 ```
 POST   /api/v1/jobs              # Submit job                       [Phase 2+]
@@ -203,7 +203,7 @@ User/CLI → REST API (control plane)
 
 > - **`[Phase 2+]`** `distributed_malloc` — no SDK implementations yet (planned for C/Python/Go/Rust bindings).
 > - **`[Phase 2+]`** SDK POSTs to `/api/v1/allocations` — the route is proto-defined (`MemoryService`) but no REST handler is wired.
-> - **`[Phase 1]`** Control plane checks resource map for free RAM — `registry.NodeRegistry` already tracks `NodeResources` accuracy today.
+> - **`[Phase 1]`** Control plane checks resource map for free RAM — `registry.NodeRegistry` already tracks `NodeResources` accuracy.
 > - **`[Phase 1 stub]`** Control plane sends `AgentService.AllocateMemory`; server returns a `MemoryHandle` for forward-compat — actual RDMA registration on the agent is deferred.
 > - **`[Phase 2+]`** Agent allocates hugepages, registers RDMA memory region. The `network/` transport crate is currently the cargo-new default only.
 > - **`[Phase 1 stub]`** Agent returns `MemoryHandle` (remote_key, address) — same stub path: identifiers returned before real NIC-side registration lands.
