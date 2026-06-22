@@ -1,0 +1,38 @@
+[
+  {
+    "symbol": "uuid7",
+    "patterns": ["\\buuid7\\b"],
+    "allow_paths": ["CHANGELOG\\.md", "ARCHITECTURE\\.md"],
+    "desc": "Replaced hand-rolled v7 UUID helper with github.com/google/uuid.NewString() (v4). Same-millisecond collision bug eliminated; see CHANGELOG Unreleased."
+  },
+  {
+    "symbol": "data_dir",
+    "patterns": ["--data-dir", "\\bdata_dir\\b"],
+    "allow_paths": [],
+    "desc": "Removed unused --data-dir CLI flag (was paired with deleted agent/src/executor.rs placeholder)."
+  },
+  {
+    "symbol": "mdns_domain",
+    "patterns": ["--mdns-domain", "\\bmdns_domain\\b"],
+    "allow_paths": [],
+    "desc": "Removed unused --mdns-domain CLI flag (was paired with deleted agent/src/discovery.rs placeholder)."
+  },
+  {
+    "symbol": "rdma",
+    "patterns": ["--rdma", "\\brdma\\b"],
+    "allow_paths": ["ARCHITECTURE\\.md", ".*_test\\.go"],
+    "desc": "Removed --rdma CLI flag (was paired with deleted agent/src/network.rs placeholder). ARCHITECTURE.md forward-looking mentions of the future rdma-shim crate / rdma.rs module are allowed because they describe planned (not yet implemented) features. _test.go allowlist permits unused-symbol mentions in test fixtures (e.g. fixture filenames) without tripping the guard every time a developer happens to choose a memorable test string."
+  },
+  {
+    "symbol": "safeHostname",
+    "patterns": ["\\bsafeHostname\\b"],
+    "allow_paths": [],
+    "desc": "Removed internal/registry.safeHostname summary helper — GetNodes responses now map NodeResources fields directly (Hostname/CPU/Memory/GPUs) inside internal/restapi."
+  },
+  {
+    "symbol": "deleted agent modules",
+    "patterns": ["\\bmod\\s+discovery\\s*;", "\\bmod\\s+network\\s*;", "\\bmod\\s+memory\\s*;", "\\bmod\\s+executor\\s*;", "\\bmod\\s+metrics\\s*;"],
+    "allow_paths": [],
+    "desc": "Removed placeholder agent modules (discovery.rs, network.rs, memory.rs, executor.rs, metrics.rs) that were ~15-line stubs. agent/src/main.rs now only declares gpu/heartbeat/resources."
+  }
+]

@@ -74,9 +74,15 @@ control-plane-test: ## Run control plane tests
 	cd $(PROJECT_ROOT)/control-plane && go test -race -count=1 ./...
 
 .PHONY: control-plane-lint
-control-plane-lint: ## Lint control plane code
+control-plane-lint: ## Lint control plane code (go vet + nullable staticcheck + golangci-lint)
 	cd $(PROJECT_ROOT)/control-plane && go vet ./...
 	cd $(PROJECT_ROOT)/control-plane && staticcheck ./... 2>/dev/null || echo "staticcheck not installed, skipping"
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		echo "$(GREEN)[lint]$(NC) Running golangci-lint on control-plane..."; \
+		cd $(PROJECT_ROOT)/control-plane && golangci-lint run ./...; \
+	else \
+		echo "$(YELLOW)[lint] golangci-lint not installed, skipping. Hint: install v1.50+ (https://golangci-lint.run)$(NC)"; \
+	fi
 
 # ============================================================================
 # CLI (Go)
@@ -96,8 +102,13 @@ cli: ## Build the CLI tool
 .PHONY: test
 test: agent-test control-plane-test ## Run all tests
 
+.PHONY: check-dead-symbols
+check-dead-symbols: ## Scan the repo for re-referenced removed symbols (catalog: scripts/dead-symbols.json)
+	@echo "$(GREEN)[lint]$(NC) Checking for dead symbols..."
+	@./scripts/check-dead-symbols.sh
+
 .PHONY: lint
-lint: proto-lint agent-lint control-plane-lint ## Run all linters
+lint: proto-lint agent-lint control-plane-lint check-dead-symbols ## Run all linters
 
 # ============================================================================
 # Docker

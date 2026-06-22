@@ -1,0 +1,60 @@
+# ============================================================================
+# golangci-lint configuration
+# ----------------------------------------------------------------------------
+# Purpose: Auto-detect unused / unreferenced Go symbols (dead vars, dead
+# funcs, dead types, unreachable assignments) so manual dead-code sweeps are
+# unnecessary. Complements scripts/check-dead-symbols.sh, which guards against
+# cross-language (Rust+Go) reintroduction of removed symbols.
+#
+# Version: requires golangci-lint v1.50+ (the `unused` linter absorbed the
+# legacy `deadcode`/`varcheck`/`structcheck` plugins back in v1.49).
+# ============================================================================
+
+run:
+  timeout: 5m
+
+  # Skip working directories whose path matches one of these regexes.
+  # `control-plane/gen/` and `cli/gen/` are buf-generated protobuf code;
+  # linting them is meaningless and noisy.
+  skip-dirs:
+    - ^.*/gen/$
+
+# ----------------------------------------------------------------------------
+# Linters
+# ----------------------------------------------------------------------------
+# disable-all: true turns off the default ~50-enablement. We re-enable only
+# the linters that catch stale references / unused code; everything else is
+# intentionally left to `go vet` (already in the Makefile) and `staticcheck`.
+# ----------------------------------------------------------------------------
+linters:
+  disable-all: true
+  enable:
+    - unused      # Canonical replacement for the deprecated `deadcode`. Flags unused vars / funcs / types / fields / imports. Default since v1.49.
+    - ineffassign # Catches assignments whose value is never read (a common dead-code smell).
+    - staticcheck # Subsumes SA4006 (unused value), the historic deadcode signal; keep for breadth.
+
+# ----------------------------------------------------------------------------
+# Per-linter tuning
+# ----------------------------------------------------------------------------
+linters-settings:
+  unused:
+    # Treat unused exported identifiers as lint errors. The justification:
+    # our proto-generated types and internal helpers are all live; an unused
+    # export almost always signals stale removal in this codebase.
+    exported-fields-are-used: true
+    # Allow `unused` to fingerprint a dependency-graph of unused params and
+    # report them together (instead of one-at-a-time for every test).
+    parameters-in-constructors: true
+
+# ----------------------------------------------------------------------------
+# Issues
+# ----------------------------------------------------------------------------
+# - exclude-use-default: false  — leave default exclusions on; they handle
+#   well-known false positives like "unused field used in a template tag".
+# - max-issues-per-linter / max-same-issues: 0 — no artificial caps; one
+#   finding per failing symbol is the goal.
+# ----------------------------------------------------------------------------
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
