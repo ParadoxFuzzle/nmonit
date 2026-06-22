@@ -11,7 +11,7 @@
 
 ```bash
 # Clone
-git clone https://github.com/compute-nmonit/nmonit.git
+git clone https://github.com/ParadoxFuzzle/nmonit.git
 cd nmonit
 
 # Generate development TLS certs (optional)

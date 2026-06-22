@@ -6,6 +6,7 @@
 [![Go](https://img.shields.io/badge/control__plane-Go-00ADD8)](control-plane/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-red)]()
+[![CI](https://github.com/ParadoxFuzzle/nmonit/actions/workflows/ci.yml/badge.svg)](https://github.com/ParadoxFuzzle/nmonit/actions/workflows/ci.yml)
 
 ---
 
