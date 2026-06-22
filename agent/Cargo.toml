@@ -14,26 +14,15 @@ tokio-stream = "0.1"
 tonic = { version = "0.14", features = ["tls-native-roots"] }
 tonic-prost = "0.14"
 prost = "0.14"
-tower = { version = "0.5", features = ["limit", "retry"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 nvml-wrapper = "0.12"
 sysinfo = "0.39"
-nix = { version = "0.31", features = ["fs", "sched"] }
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
-tracing-appender = "0.2"
-metrics = "0.24"
-metrics-exporter-prometheus = "0.18"
 thiserror = "2"
 anyhow = "1"
-uuid = { version = "1", features = ["v4", "v7"] }
 hostname = "0.4"
 libc = "0.2"
 
 [build-dependencies]
 tonic-prost-build = "0.14"
-
-[dev-dependencies]
-tempfile = "3"

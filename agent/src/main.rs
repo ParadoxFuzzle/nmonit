@@ -1,23 +1,19 @@
 /// Distributed Compute Fabric — Node Agent
 ///
-/// Runs on every node in the cluster. Responsible for:
+/// Runs on every node in the cluster. Phase 1 responsibilities:
 /// - Hardware resource discovery and reporting
 /// - Heartbeat / health reporting to control plane
-/// - Task execution (containerd runtime hook)
-/// - Distributed memory management (RDMA)
 /// - GPU memory management
-/// - Metrics collection
+///
+/// Higher-level concerns (task execution, distributed memory, metrics
+/// collection, mDNS discovery, RDMA transport) are planned for later
+/// phases — see ARCHITECTURE.md.
 use clap::Parser;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
-mod discovery;
-mod executor;
 mod gpu;
 mod heartbeat;
-mod memory;
-mod metrics;
-mod network;
 mod resources;
 
 /// Generated protobuf + gRPC types from the shared .proto definitions.
@@ -41,21 +37,9 @@ struct Args {
     #[arg(short, long)]
     node_id: Option<String>,
 
-    /// Directory for agent state
-    #[arg(long, default_value = "/var/lib/compute-agent")]
-    data_dir: String,
-
-    /// mDNS domain for auto-discovery (LAN only)
-    #[arg(long, default_value = "_compute-fabric._tcp.local")]
-    mdns_domain: String,
-
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info")]
     log_level: String,
-
-    /// Enable RDMA (requires compatible hardware)
-    #[arg(long, default_value = "true")]
-    rdma: bool,
 
     /// Override GPU detection (useful for testing without GPUs)
     #[arg(long)]
