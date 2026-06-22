@@ -2,6 +2,18 @@
 
 > **Status:** Decisions documented 2026-06-08
 > **Based on:** PRD v1 (Draft)
+>
+> **About this document:** This document describes the **target** architecture.
+> Items not yet implemented are present in the aspirational (planned or
+> in-flight) but have not landed in code — see `CHANGELOG.md` (especially the `## [Unreleased]` section) and `git log --oneline` for
+> the actual delivered surface.
+> 
+>
+> **Phase legend:**
+>
+> - **`[Phase 1]`** — shipping today: handler / route is registered and callable end-to-end (a deferred effect inside the handler is called out explicitly, e.g. "RDMA registration pending" or "dispatch TODO").
+> - **`[Phase 1 stub]`** — handler exists on a registered gRPC service or REST route, accepts the request, and returns ACK / success; the actual effect (real RDMA, task dispatch, scheduler placement, etc.) is deferred to a later phase.
+> - **`[Phase 2+]`** — described in proto (`proto/compute/v1/*.proto`), but no service is registered on the control-plane daemon, OR the referenced backing subsystem (scheduler, SDK, Raft, mDNS, FUSE, RDMA transport) is not yet implemented.
 
 ---
 
@@ -86,7 +98,10 @@
 
 ## Component Interfaces
 
-### Agent ↔ Control Plane (gRPC)
+### Agent ↔ Control Plane (gRPC) — `[Phase 1]`, with stub handlers called out
+
+> - **`[Phase 1]` (callable, end-to-end):** `Register`, `Heartbeat`.
+> - **`[Phase 1 stub]` (callable, returns ACK; RDMA / dispatch pending):** `ExecuteTask`, `AllocateMemory`, `AllocateGPUMemory`, plus proto siblings `FreeMemory`, `FreeGPUMemory`. The handlers are registered on the gRPC server (`control-plane/internal/agent/agent.go`) and acknowledge every request, but the actual memory-region registration, task dispatch, and GPU-memory wiring is deferred — see the in-code TODO comments.
 
 ```protobuf
 service AgentService {
@@ -102,26 +117,38 @@ service AgentService {
   // Control plane requests memory allocation on this node
   rpc AllocateMemory(MemoryAllocRequest) returns (MemoryAllocResponse);
 
-  // Control plane requests GPU memory allocation
-  rpc AllocateGPUMemory(GPUMemoryAllocRequest) returns (GPUMemoryAllocResponse);
+  // Control plane requests GPU memory allocation  rpc AllocateGPUMemory(GPUMemoryAllocRequest) returns (GPUMemoryAllocResponse);
 }
 ```
+### Other gRPC Services (proto-defined; not currently registered) — `[Phase 2+]`
+
+> Beyond `AgentService` (callable end-to-end today — see its preamble above) and the REST surface wired to `/api/v1/nodes` + `/health` + `/metrics`, four more gRPC services are fully defined in `proto/compute/v1/{job,memory,storage,control}.proto`. None of their 14 RPCs are currently registered, so callers can't reach them end-to-end. Readers searching for `MemoryService.AllocateDistributed` should note it is *conceptually distinct* from `AgentService.AllocateMemory`: the agent-side RPC currently returns a stub `MemoryHandle` (see the Distributed Memory Allocation data flow); a real cluster-wide allocation via `MemoryService.AllocateDistributed` does not yet exist. REST endpoints above cover a subset of these operations; this paragraph is the canonical "what proto contracts exist but aren't wired" pointer.
+>
+> - **`[Phase 2+]` `JobService`** (`proto/compute/v1/job.proto`): `SubmitJob`, `GetJob`, `ListJobs`, `CancelJob`, `StreamLogs`, `GetJobMetrics`.
+> - **`[Phase 2+]` `MemoryService`** (`proto/compute/v1/memory.proto`): `AllocateDistributed`, `MigrateRegion`, `GetRegion`.
+> - **`[Phase 2+]` `StorageService`** (`proto/compute/v1/storage.proto`): `CreateDataset`, `ListDatasets`, `GetDatasetStatus`.
+> - **`[Phase 2+]` `ControlService`** (`proto/compute/v1/control.proto`): `GetClusterState`, `JoinCluster`.
 
 ### Client API (REST + gRPC)
 
+> Phase coverage reflects what `control-plane/internal/restapi/` actually serves today (only `/health`, `/api/v1/nodes`, `/metrics`). Routes under `/api/v1/jobs`, `/api/v1/resources`, `/api/v1/allocations` are part of the `JobService` and `MemoryService` proto definitions (`proto/compute/v1/{job,memory}.proto`), but neither service is currently registered (so they're not callable end-to-end even though the contract exists).
+
 ```
-POST   /api/v1/jobs              # Submit job
-GET    /api/v1/jobs/{id}         # Job status
-DELETE /api/v1/jobs/{id}         # Cancel job
-GET    /api/v1/jobs/{id}/logs    # Stream logs (SSE)
-GET    /api/v1/resources          # Cluster resource state
-GET    /api/v1/nodes             # Per-node info
-POST   /api/v1/allocations       # Distributed memory allocation
-GET    /api/v1/allocations       # List allocations
-DELETE /api/v1/allocations/{id}  # Free allocation
+POST   /api/v1/jobs              # Submit job                       [Phase 2+]
+GET    /api/v1/jobs/{id}         # Job status                       [Phase 2+]
+DELETE /api/v1/jobs/{id}         # Cancel job                       [Phase 2+]
+GET    /api/v1/jobs/{id}/logs    # Stream logs (SSE)                [Phase 2+]
+GET    /api/v1/resources         # Cluster resource state           [Phase 2+]
+GET    /api/v1/nodes             # Per-node info                    [Phase 1]
+POST   /api/v1/allocations       # Distributed memory allocation    [Phase 2+]
+GET    /api/v1/allocations       # List allocations                 [Phase 2+]
+DELETE /api/v1/allocations/{id}  # Free allocation                  [Phase 2+]
 ```
 
-### SDK API (C, exposed to Python/Go/Rust bindings)
+### SDK API (C, exposed to Python/Go/Rust bindings) — `[Phase 2+]`
+
+> - **No SDK implementations exist** today: the `sdk/{c,python,go}/` directories contain only `README.md` per language.
+> - The C ABI below is design intent. Bindings will materialize once the control-plane endpoints and agent capabilities behind them ship.
 
 ```c
 // Memory
@@ -152,6 +179,15 @@ int   fabric_restore(checkpoint_id_t id);
 
 ## Data Flow: Job Submission
 
+> - **`[Phase 2+]`** step 1 — REST `POST /api/v1/jobs` submit gate. The route is proto-defined (`JobService`) but neither that service nor a REST handler is currently wired.
+> - **`[Phase 2+]`** Scheduler evaluates resource requirements / affinity / current load — no scheduler package exists in `control-plane/`.
+> - **`[Phase 2+]`** Scheduler selects target node(s).
+> - **`[Phase 1 stub]`** Control plane sends `ExecuteTask` RPC to agent. Handler accepts and ACKs requests (`control-plane/internal/agent/agent.go`) — actual task dispatch is deferred (in-code TODO comment).
+> - **`[Phase 2+]`** Agent pulls container image, starts task, sets up fabric devices. The agent's executor module was removed in the Phase 1 cleanup.
+> - **`[Phase 1]`** Agent streams logs + metrics back to control plane via the existing heartbeat stream (resource updates).
+> - **`[Phase 2+]`** Control plane updates job status. `registry.NodeInfo.Tasks` holds per-node task state; the cross-node `Job` aggregate is not persisted yet.
+> - **`[Phase 2+]`** User polls `GET /api/v1/jobs/{id}` or streams logs.
+
 ```
 User/CLI → REST API (control plane)
   → Scheduler evaluates: resource requirements, affinity, current load
@@ -164,6 +200,16 @@ User/CLI → REST API (control plane)
 ```
 
 ## Data Flow: Distributed Memory Allocation
+
+> - **`[Phase 2+]`** `distributed_malloc` — no SDK implementations yet (planned for C/Python/Go/Rust bindings).
+> - **`[Phase 2+]`** SDK POSTs to `/api/v1/allocations` — the route is proto-defined (`MemoryService`) but no REST handler is wired.
+> - **`[Phase 1]`** Control plane checks resource map for free RAM — `registry.NodeRegistry` already tracks `NodeResources` accuracy today.
+> - **`[Phase 1 stub]`** Control plane sends `AgentService.AllocateMemory`; server returns a `MemoryHandle` for forward-compat — actual RDMA registration on the agent is deferred.
+> - **`[Phase 2+]`** Agent allocates hugepages, registers RDMA memory region. The `network/` transport crate is currently the cargo-new default only.
+> - **`[Phase 1 stub]`** Agent returns `MemoryHandle` (remote_key, address) — same stub path: identifiers returned before real NIC-side registration lands.
+> - **`[Phase 2+]`** Control plane returns handle to SDK.
+> - **`[Phase 2+]`** SDK maps remote memory region locally using RDMA.
+> - **`[Phase 2+]`** App reads/writes via RDMA to the remote node.
 
 ```
 App calls distributed_malloc(1GB)
@@ -181,6 +227,15 @@ App calls distributed_malloc(1GB)
 
 ## Cluster Bootstrap Flow
 
+> - **Step 1a:** first control-plane node starts (single-node serving). The daemon listens on `--grpc-addr` + `--http-addr` and exposes `/health`, `/api/v1/nodes`, Prometheus `/metrics`, plus `AgentService.Register` / `Heartbeat`. `[Phase 1]` — works today without any Raft being touched.
+> - **Step 1b:** Raft log replay + leadership-election init. Needs to run before any other node joins. `[Phase 2+]` — no `hashicorp/raft` import.
+> - **Step 2:** additional control-plane nodes join via Raft membership update. `[Phase 2+]`. (`ControlService.JoinCluster` is proto-defined but not registered.)
+> - **Step 3a:** `--control-plane` CLI flag discovery. Each agent unicast-connects to the given gRPC address. `[Phase 1]`.
+> - **Step 3b:** mDNS auto-discovery of the control plane over LAN. `[Phase 2+]` (`agent/src/discovery.rs` was removed in Phase 1 cleanup).
+> - **Step 4:** agent registers with control plane and advertises hardware resources — `[Phase 1]` (`AgentService.Register` → `registry.Register` end-to-end).
+> - **Step 5:** control plane's resource map is updated in registry — `[Phase 1]`.
+> - **Step 6:** cluster ready — `[Phase 1]`.
+
 ```
 1. First control plane node starts → initializes Raft cluster (single node)
 2. Additional control plane nodes join → Raft membership update
@@ -195,7 +250,7 @@ App calls distributed_malloc(1GB)
 ## Directory Structure
 
 ```
-compute-nmonit/
+nmonit/
 ├── README.md
 ├── ARCHITECTURE.md          # This file
 ├── Makefile                 # Top-level build orchestration
@@ -212,105 +267,69 @@ compute-nmonit/
 │           └── storage.proto    # Storage layer types
 ├── agent/                   # Rust — node agent
 │   ├── Cargo.toml
+│   ├── build.rs             # Tonic-prost protobuf codegen hook
 │   └── src/
-│       ├── main.rs
-│       ├── discovery.rs     # mDNS / static peer discovery
-│       ├── heartbeat.rs     # Health reporting to control plane
-│       ├── resources.rs     # Hardware probing (CPU, RAM, GPU, NIC, storage)
-│       ├── gpu.rs           # GPU management (NVML, CUDA)
-│       ├── memory.rs        # RDMA memory registration, hugepages
-│       ├── network.rs       # UCX/RDMA setup, TCP fallback
-│       ├── executor.rs      # Task execution (containerd runtime hook)
-│       └── metrics.rs       # Per-node metrics collection
-├── control-plane/           # Go — scheduler, API, resource manager
+│       ├── main.rs          # CLI entrypoint + connection lifecycle
+│       ├── heartbeat.rs     # gRPC heartbeat stream + reconnect backoff
+│       ├── resources.rs     # Hardware probing (CPU, RAM, GPU)
+│       └── gpu.rs           # GPU management (NVML)
+├── control-plane/           # Go — control-plane daemon
 │   ├── go.mod
 │   ├── go.sum
 │   ├── cmd/
 │   │   └── control-plane/
-│   │       └── main.go
+│   │       ├── main.go              # gRPC + HTTP server wiring
+│   │       └── interceptor_test.go  # Interceptor-chain invariants
+│   ├── gen/                 # Protobuf + gRPC generated code (buf-generated; do not edit)
+│   │   └── compute/
+│   │       └── v1/
 │   └── internal/
-│       ├── api/             # REST + gRPC server
-│       │   ├── server.go
-│       │   ├── jobs.go
-│       │   ├── resources.go
-│       │   └── allocations.go
-│       ├── scheduler/       # Job scheduler
-│       │   ├── scheduler.go
-│       │   ├── first_fit.go
-│       │   ├── gang.go
-│       │   └── affinity.go
-│       ├── resources/       # Resource tracking
-│       │   ├── manager.go
-│       │   ├── node.go
-│       │   └── topology.go
-│       ├── consensus/       # Raft cluster management
-│       │   ├── raft.go
-│       │   └── fsm.go       # Finite state machine for Raft
-│       ├── health/          # Health monitoring
-│       │   └── monitor.go
-│       └── auth/            # AuthN/AuthZ (future)
-│           └── rbac.go
-├── sdk/
-│   ├── c/                   # C SDK (libfabric_client)
-│   │   ├── Makefile
-│   │   ├── include/
-│   │   │   └── fabric.h
-│   │   └── src/
-│   │       ├── malloc.c
-│   │       ├── gpu.c
-│   │       ├── comms.c
-│   │       └── client.c
-│   ├── python/              # Python bindings (pyo3 or ctypes)
-│   │   ├── pyproject.toml
-│   │   └── src/
-│   │       └── compute_fabric/
-│   │           ├── __init__.py
-│   │           ├── array.py
-│   │           └── gpu.py
-│   └── go/                  # Go SDK (client library)
-│       ├── go.mod
-│       └── fabric/
-│           ├── client.go
-│           ├── memory.go
-│           └── gpu.go
-├── cli/                     # CLI tool (Go)
+│       ├── agent/           # gRPC AgentService handlers + auth + validation
+│       ├── registry/        # Node state, heartbeat accounting, stale cleanup
+│       ├── restapi/         # HTTP handlers (/health, /api/v1/nodes, /metrics)
+│       ├── validator/       # Per-field input validation rules
+│       ├── metrics/         # Prometheus collectors + interceptors
+│       └── tlsreload/       # Hot-reload TLS certificate reloader
+├── sdk/                     # Language SDKs (planned; only README.md per language today)
+│   ├── c/                   # C bindings (planned)
+│   │   └── README.md
+│   ├── python/              # Python bindings via pyo3 or ctypes (planned)
+│   │   └── README.md
+│   └── go/                  # Go client library (planned)
+│       └── README.md
+├── cli/                     # CLI tool (Go — placeholder; main.go/cmd/ not yet written)
 │   ├── go.mod
-│   ├── main.go
-│   └── cmd/
-│       ├── submit.go
-│       ├── status.go
-│       ├── nodes.go
-│       ├── logs.go
-│       └── alloc.go
+│   └── go.sum
 ├── dashboard/               # Web dashboard (future — React/TypeScript)
 │   └── README.md
-├── storage/                 # Distributed storage (Rust)
+├── storage/                 # Rust crate `compute-storage`; lib.rs is the cargo-new default
+│   │                        # (description promises "FUSE + S3-compatible API"; real modules pending)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── lib.rs
-│       ├── fs.rs            # FUSE filesystem
-│       ├── s3.rs            # S3-compatible API
-│       ├── replication.rs
-│       └── tiering.rs
-├── network/                 # Network fabric library (Rust)
+│       └── lib.rs
+├── network/                 # Rust crate `compute-network`; lib.rs is the cargo-new default
+│   │                        # (description promises "RDMA/TCP transport layer"; real modules pending)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── lib.rs
-│       ├── rdma.rs          # UCX/RDMA transport
-│       ├── tcp.rs           # TCP fallback
-│       ├── qos.rs           # Traffic classes
-│       └── topology.rs      # Network topology discovery
+│       └── lib.rs
+├── scripts/                 # Repo-local lint / utility scripts
+│   ├── check-dead-symbols.sh        # Guards against removed-symbol reintroduction
+│   └── dead-symbols.json            # Catalog of removed symbols + per-entry allow_paths
 ├── deploy/                  # Deployment configurations
 │   ├── docker/
 │   │   ├── Dockerfile.agent
+│   │   ├── Dockerfile.cli
 │   │   └── Dockerfile.control-plane
-│   └── systemd/
-│       ├── compute-agent.service
-│       └── compute-control-plane.service
-└── docs/
-    ├── ARCHITECTURE.md
-    ├── API.md
-    └── DEVELOPMENT.md
+│   ├── systemd/
+│   │   ├── compute-agent.service
+│   │   └── compute-control-plane.service
+│   ├── grafana/
+│   │   ├── nmonit-dashboard.json
+│   │   ├── dashboards/nmonit.yml
+│   │   └── datasources/prometheus.yml
+│   └── prometheus/
+│       └── prometheus.yml
+└── docs/                    # Public docs directory (planned; present but empty)
 ```
 
 ---
