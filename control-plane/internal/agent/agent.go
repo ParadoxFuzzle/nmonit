@@ -22,6 +22,7 @@ import (
 	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
 	"github.com/ParadoxFuzzle/control-plane/internal/audit"
 	"github.com/ParadoxFuzzle/control-plane/internal/identity"
+	"github.com/ParadoxFuzzle/control-plane/internal/jobs"
 	"github.com/ParadoxFuzzle/control-plane/internal/registry"
 	"github.com/ParadoxFuzzle/control-plane/internal/validator"
 	"github.com/rs/zerolog/log"
@@ -46,6 +47,13 @@ type AgentServer struct {
 	auth *Authenticator
 	// Audit records security events (may be nil when identity is off).
 	audit *audit.Audit
+
+	// Phase 2 job dispatch: hub buffers pending/cancel work per node and
+	// applies reported task statuses to the job store; scheduler assigns
+	// queued jobs to this node's stream opportunistically. Both nil-able
+	// (nil = job dispatch disabled).
+	hub   *jobs.Hub
+	sched *jobs.Scheduler
 }
 
 // NewAgentServer constructs an AgentServer wired to the given registry.
@@ -69,6 +77,13 @@ func NewAgentServerWithIdentity(reg *registry.NodeRegistry, clusterID, leaderAdd
 		auth:       auth,
 		audit:      aud,
 	}
+}
+
+// SetJobDispatch enables Phase 2 job dispatch on this server: pending
+// TaskSpecs ride the heartbeat stream and reported task statuses update
+// the job store. Either may be nil to disable that half.
+func (s *AgentServer) SetJobDispatch(hub *jobs.Hub, sched *jobs.Scheduler) {
+	s.hub, s.sched = hub, sched
 }
 
 // checkAuth applies AgentServer's bearer-token policy to a unary context and
@@ -252,6 +267,12 @@ func (s *AgentServer) Register(ctx context.Context, req *computev1.RegisterReque
 	if err != nil {
 		return nil, err
 	}
+	// Phase 2: consumer-role tokens are for job submission, not compute
+	// contribution. Reject them here so a leaked consumer token cannot
+	// register (and bind) a node.
+	if id := IdentityFrom(ctx); id != nil && id.Role == identity.RoleConsumer {
+		return nil, status.Error(codes.PermissionDenied, "consumer tokens cannot register nodes")
+	}
 	if err := validateAll(ctx, "Register", []validationCheck{
 		newCheck("node_id", func() error { return validator.ValidateNodeID(req.NodeId) }),
 		newCheck("address", func() error { return validator.ValidateAddress(req.Address) }),
@@ -345,12 +366,16 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 
 	s.registry.UpdateHeartbeat(first.NodeId, first.Utilization, first.Tasks)
 
+	pending, cancels := s.dispatchFor(stream.Context(), first.NodeId, first.Tasks)
+
 	done := make(chan struct{})
 	defer close(done)
 
 	if err := stream.Send(&computev1.HeartbeatResponse{
-		Acknowledged: true,
-		Sequence:     first.Sequence,
+		Acknowledged:  true,
+		Sequence:      first.Sequence,
+		PendingTasks:  pending,
+		CancelTaskIds: cancels,
 	}); err != nil {
 		log.Warn().Err(err).Msg("failed to send initial heartbeat ack")
 		return err
@@ -364,8 +389,11 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 			case <-done:
 				return
 			case <-ticker.C:
+				pending, cancels := s.dispatchFor(stream.Context(), nodeID, nil)
 				if err := stream.Send(&computev1.HeartbeatResponse{
-					Acknowledged: true,
+					Acknowledged:  true,
+					PendingTasks:  pending,
+					CancelTaskIds: cancels,
 				}); err != nil {
 					log.Warn().Err(err).Msg("failed to send heartbeat ack")
 					return
@@ -396,11 +424,41 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 
 		s.registry.UpdateHeartbeat(req.NodeId, req.Utilization, req.Tasks)
 
+		// Phase 2 dispatch: fold reported task statuses into the job store,
+		// opportunistically schedule queued work for online nodes, and push
+		// this node's pending/cancel work back down its stream.
+		pending, cancels := s.dispatchFor(stream.Context(), req.NodeId, req.Tasks)
+		if len(pending) > 0 || len(cancels) > 0 {
+			if err := stream.Send(&computev1.HeartbeatResponse{
+				Acknowledged:  true,
+				Sequence:      req.Sequence,
+				PendingTasks:  pending,
+				CancelTaskIds: cancels,
+			}); err != nil {
+				log.Warn().Err(err).Str("node_id", req.NodeId).Msg("failed to send dispatch response")
+				return err
+			}
+		}
+
 		log.Debug().
 			Str("node_id", req.NodeId).
 			Uint64("sequence", req.Sequence).
 			Msg("heartbeat received")
 	}
+}
+
+// dispatchFor folds reported task statuses into the job store, schedules
+// queued jobs, and drains this node's pending/cancel queues. Safe no-op
+// when job dispatch is disabled.
+func (s *AgentServer) dispatchFor(ctx context.Context, nodeID string, tasks []*computev1.TaskStatus) ([]*computev1.PendingTask, []string) {
+	if s.hub == nil {
+		return nil, nil
+	}
+	s.hub.ApplyTaskStatuses(ctx, nodeID, tasks)
+	if s.sched != nil {
+		s.sched.ScheduleOnce(ctx, 4)
+	}
+	return s.hub.Drain(nodeID), s.hub.DrainCancels(nodeID)
 }
 
 func (s *AgentServer) ExecuteTask(ctx context.Context, req *computev1.TaskSpec) (*computev1.TaskAck, error) {
