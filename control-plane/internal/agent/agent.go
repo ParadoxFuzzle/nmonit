@@ -256,6 +256,12 @@ func (s *AgentServer) Register(ctx context.Context, req *computev1.RegisterReque
 		newCheck("node_id", func() error { return validator.ValidateNodeID(req.NodeId) }),
 		newCheck("address", func() error { return validator.ValidateAddress(req.Address) }),
 		newCheck("agent_version", func() error { return validator.ValidateVersion(req.AgentVersion) }),
+		newCheck("resources", func() error {
+			if req.Resources == nil {
+				return status.Error(codes.InvalidArgument, "missing resources")
+			}
+			return nil
+		}),
 	}); err != nil {
 		return nil, err
 	}
