@@ -102,25 +102,38 @@ curl -s -o /dev/null -w '%{http_code}\n' https://nmonit.jerithai.com/join   # 20
 Verified working (2026-10-08): `/health` → `{"status":"ok"}`, `/join` → 200,
 invalid invite POST → 403, all through the Cloudflare edge.
 
-## 6. gRPC for agents (open item)
+## 6. gRPC for agents (implemented 2026-10-08)
 
-The tunnel currently carries only the REST/UI host. Two options for agent
-gRPC traffic:
+**Decision made:** same tunnel, dedicated hostname.
 
-1. **Same tunnel (preferred, no extra DNS):** add an ingress rule for the
-   gRPC endpoint, e.g. route `nmonit.jerithai.com` with an HTTP `:443` path
-   split, or simpler: add hostname `grpc-nmonit.jerithai.com` →
-   `https://127.0.0.1:9000` (cloudflared supports gRPC passthrough over
-   HTTP/2; the control plane's gRPC server already serves TLS). Contributors
-   then use `--control-plane https://grpc-nmonit.jerithai.com:443` with
-   system CA trust — **requires switching the gRPC server to a publicly
-   trusted cert** (Cloudflare origin cert works when CF terminates TLS).
-2. **Direct port forward** if the ISP block is ever lifted: forward
-   9005→9000 on the router and keep the self-signed CA pinned in agents.
+- Ingress rule added for `grpc-nmonit.jerithai.com` → `https://127.0.0.1:9000`
+  with `http2Origin: true` (gRPC requires end-to-end HTTP/2). DNS CNAME routed
+  via `cloudflared tunnel route dns --overwrite-dns`.
+- The control plane's gRPC server **no longer requires client certificates**
+  (the `--tls-ca-cert` mTLS flag was removed from the systemd unit; the
+  `--require-tls` flag replaces it). Reason: tunnel-origin connections carry
+  no client certs, so mandatory mTLS would break the handshake. Auth is
+  enforced at the application layer instead — bootstrap token + per-node
+  `nmt_` tokens + per-credential rate limiting (Phase-1 design).
+- **Verified end-to-end at the origin:** a gRPC client reaching :9000 through
+  the tunnel ingress path gets app-level responses (auth + validation working;
+  a malformed Register returns `InvalidArgument`, not a crash).
+- **Blocked at the Cloudflare zone level:** proxied gRPC requires the
+  `gRPC` toggle ON in the CF dashboard (Network tab). Without it CF returns a
+  403 HTML page to gRPC clients. Owner action: CF dashboard →
+  jerithai.com → Network → WebSockets/gRPC → enable. Note: a CF error page
+  (or Bot Fight Mode) can also produce 403s — if the toggle is already on,
+  check Security → Bots.
+- Cert trust for contributors: agents connect to
+  `https://grpc-nmonit.jerithai.com:443` and verify against **system CA
+  trust** — they see Cloudflare's public edge cert, never the origin cert.
+  The origin keeps its self-signed `server.crt` (cloudflared uses
+  `noTLSVerify` for the last hop). The earlier plan to install a public cert
+  on the origin is unnecessary with the tunnel and was dropped.
 
-Do NOT expose gRPC through the same hostname as the REST UI without an
-explicit ingress split — the identity-layer rate limiter is per-token, but
-the UI must not be reachable over the gRPC port.
+> Historical note: the old `cf-origin.crt` is a Cloudflare **client**-auth
+> cert (EKU: Client Authentication, no SAN) from the Caddy era — it was
+> never usable as a server cert for the gRPC listener.
 
 ## 7. Contributor instructions (publish these)
 
@@ -128,11 +141,10 @@ the UI must not be reachable over the gRPC port.
 1. Submit the join form:      https://nmonit.jerithai.com/join
 2. Wait for approval with your token (nmt_...)
 3. Download compute-agent, then:
-   ./compute-agent --control-plane https://nmonit.jerithai.com \
+   ./compute-agent --control-plane https://grpc-nmonit.jerithai.com:443 \
      --agent-token nmt_...
-```
-
-(gRPC endpoint details pending section 6 decision.)
+   (System CA trust — no --tls-ca-cert needed. Requires the operator to
+   have enabled the gRPC toggle in the Cloudflare dashboard.)
 
 ## 8. Operator cheat sheet
 
@@ -155,11 +167,14 @@ absorbs volumetric DoS in front of the tunnel.
 
 # Historical alternatives (not in use)
 
-## A. Caddy + Cloudflare origin cert (was deployed 2026-10-08, superseded)
+## A. Caddy + Cloudflare origin cert (retired 2026-10-08)
 
-Worked locally (`curl --resolve nmonit.jerithai.com:443:127.0.0.1` → ok) but
-was unreachable publicly because the ISP blocks inbound 443. Kept for
-reference if ports open up or the host moves behind a VPS.
+Caddy is **disabled and its site block removed** (config preserved at
+`/etc/caddy/Caddyfile.nmonit-retired-20261008`) — the tunnel made it
+redundant. It worked locally (`curl --resolve
+nmonit.jerithai.com:443:127.0.0.1` → ok) but was unreachable publicly
+because the ISP blocks inbound 443. Kept for reference if ports open up or
+the host moves behind a VPS.
 
 - Caddyfile site block: `tls /etc/caddy/certs/cf-origin.crt
   /etc/caddy/certs/cf-origin.key`, `reverse_proxy https://127.0.0.1:8080`
