@@ -1,5 +1,53 @@
 # Changelog
 
+## [Unreleased] — Public-access Phase 2 (job submission flow)
+
+### Added
+- **Job submission layer** (`internal/jobs`): PostgreSQL-backed job store
+  (jsonb `command`/`env` columns; `NULL user_id` for owner submissions),
+  job states (`queued → scheduling → running → completed/failed/cancelled`),
+  and a best-fit scheduler that assigns queued jobs to nodes with enough
+  free cpu/mem, dispatching tasks over the existing heartbeat stream.
+- **Three consumer quotas**, all enforced at submit time: max running
+  (scheduling+running) jobs, max queued jobs, and max per-job resources
+  (cores/memory). Per-user overrides via `users.max_jobs_running` /
+  `users.max_jobs_queued`; owner/bootstrap submissions bypass quotas.
+  Defaults: `--max-jobs-running 2`, `--max-jobs-queued 5`,
+  `--max-job-cores 4`, `--max-job-mem-gb 8`.
+- **REST jobs API**: `POST/GET /api/v1/jobs` (submit/list) and
+  `GET/DELETE /api/v1/jobs/{id}` (inspect/cancel), auth'd the same way as
+  the identity layer — owner API key (full access, no quotas) or a
+  consumer-role `nmt_` Bearer token (own jobs only, quotas enforced);
+  provider-role tokens are rejected.
+- **gRPC JobService** (`compute.v1.JobService`): Submit/Get/List/Cancel
+  with the same role model, served by the control plane alongside the
+  agent service.
+- **`nmonitctl job`** subcommands: `submit --name --image [--cpu]
+  [--mem-gb]`, `list`, `get`, `cancel` (owner path via API key).
+- **Heartbeat dispatch wiring**: control plane drains pending tasks and
+  cancels to each node on heartbeat ticks and on job submission; agent
+  instruction handling already consumes `pending_tasks`/`cancel_task_ids`.
+
+### Fixed
+- `nmonitctl` subcommand flags placed after positional arguments were
+  silently ignored by Go's `flag` package (`user add <email> --role
+  consumer` created providers); flag-first reordering now applied to
+  `user add`, `token issue`, `invite create`, and `job submit`.
+- Job store operations log their underlying error instead of returning
+  opaque HTTP 500s.
+
+### Security
+- Consumer-role tokens cannot register nodes (gRPC Register returns
+  PermissionDenied); provider-role tokens cannot use the job API.
+- Job ownership enforced on get/cancel: consumers receive 403 for jobs
+  they do not own.
+
+> Note: agents currently log dispatched tasks but do not yet execute
+> containers — jobs reach `scheduling` and remain there until agent-side
+> execution lands (planned follow-up).
+
+---
+
 ## [Unreleased] — Public-access Phase 1 (identity layer)
 
 ### Added
