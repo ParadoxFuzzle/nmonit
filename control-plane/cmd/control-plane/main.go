@@ -261,9 +261,16 @@ func main() {
 			log.Fatal().Err(err).Msg("gRPC server failed")
 		}
 	}()
-
 	api := restapi.NewAPIServer(reg, *apiKey, tlsEnabled)
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(landingHTML))
+	})
 	mux.HandleFunc("/health", api.HealthHandler)
 	mux.HandleFunc("/api/v1/nodes", api.RequireAPIKey(api.NodesHandler))
 	mux.Handle("/metrics", api.RequireAPIKey(metrics.Handler().ServeHTTP))
@@ -346,3 +353,20 @@ shutdown:
 
 	log.Info().Msg("shutdown complete")
 }
+
+// landingHTML is served at / so the public hostname doesn't show a bare
+// "404 page not found". Unknown paths still fall through to http.NotFound.
+const landingHTML = `<!doctype html>
+<html><head><title>nmonit</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui;max-width:560px;margin:5rem auto;padding:0 1rem;color:#1c2733}
+a{color:#2d6cdf}code{background:#f2f4f7;padding:.1rem .35rem;border-radius:4px}</style></head>
+<body>
+<h1>nmonit</h1>
+<p>Distributed compute monitoring and job submission.</p>
+<ul>
+<li><a href="/health">/health</a> — cluster status (JSON)</li>
+<li><a href="/join">/join</a> — request access to contribute or submit jobs</li>
+<li><code>/api/v1/jobs</code> — job submission API (owner key or consumer token required)</li>
+</ul>
+</body></html>`
