@@ -43,6 +43,7 @@ type Authenticator struct {
 	bootstrap identity.OwnerBootstrapToken
 	store     identity.Store
 	audit     *audit.Audit
+	limiter   *identity.RateLimiter // per-credential gRPC rate limiting (nil = off)
 }
 
 // NewAuthenticator wires an Authenticator. store/audit may be nil.
@@ -52,6 +53,12 @@ func NewAuthenticator(bootstrapToken string, store identity.Store, aud *audit.Au
 		store:     store,
 		audit:     aud,
 	}
+}
+
+// SetRateLimiter enables per-credential rate limiting (e.g. 20 req/s, burst 40).
+// Bootstrap-token callers bypass the limiter.
+func (a *Authenticator) SetRateLimiter(rate float64, burst int) {
+	a.limiter = identity.NewRateLimiter(rate, burst)
 }
 
 // bearer extracts the raw bearer credential from gRPC metadata.
@@ -80,9 +87,15 @@ func (a *Authenticator) Authenticate(ctx context.Context, auditActor string) (*I
 		return nil, err
 	}
 
-	// 1) Shared bootstrap token (trusted-LAN / owner path).
+	// 1) Shared bootstrap token (trusted-LAN / owner path) — not rate limited.
 	if a.bootstrap.Matches(presented) {
 		return &Identity{Via: "bootstrap"}, nil
+	}
+
+	// Rate limit everyone else by credential hash.
+	if a.limiter != nil && !a.limiter.Allow(presented) {
+		a.auditFail(ctx, auditActor, "", "rate limited")
+		return nil, status.Error(codes.ResourceExhausted, "rate limit exceeded")
 	}
 
 	// 2) Per-node token via the identity store.

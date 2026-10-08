@@ -21,6 +21,7 @@ import (
 
 	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
 	"github.com/ParadoxFuzzle/control-plane/internal/audit"
+	"github.com/ParadoxFuzzle/control-plane/internal/identity"
 	"github.com/ParadoxFuzzle/control-plane/internal/registry"
 	"github.com/ParadoxFuzzle/control-plane/internal/validator"
 	"github.com/rs/zerolog/log"
@@ -263,6 +264,14 @@ func (s *AgentServer) Register(ctx context.Context, req *computev1.RegisterReque
 	// Bootstrap-token registrations (trusted-LAN / owner) are not bound —
 	// node identity only applies to per-node token holders.
 	if id := IdentityFrom(ctx); id != nil && id.Via == "node-token" && s.auth != nil && s.auth.store != nil {
+		// Quota: contributors are limited to N bound nodes (default 3).
+		if err := identity.CheckNodeQuotaWithStore(ctx, s.auth.store, id.UserID); err != nil {
+			if s.audit != nil {
+				s.audit.Append(ctx, audit.Entry{Actor: id.Email, Action: "register.quota",
+					Object: req.NodeId, Outcome: "denied"})
+			}
+			return nil, status.Error(codes.PermissionDenied, "node quota exceeded")
+		}
 		if err := s.auth.store.BindNode(ctx, req.NodeId, id.UserID, id.TokenID); err != nil {
 			log.Error().Err(err).Str("node_id", req.NodeId).Msg("identity: node bind failed")
 		} else {

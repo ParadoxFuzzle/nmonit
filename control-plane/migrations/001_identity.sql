@@ -67,3 +67,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_log_ts_idx ON audit_log (ts DESC);
 CREATE INDEX IF NOT EXISTS audit_log_action_idx ON audit_log (action);
+
+-- Per-user node quota (NULL = default 3).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS max_nodes INT;

@@ -100,6 +100,7 @@ func main() {
 		}
 	}
 	auth = agent.NewAuthenticator(*agentToken, identityStore, aud)
+	auth.SetRateLimiter(20, 40) // per-credential: 20 req/s, burst 40
 
 	leaderAddr := *grpcAddr
 	if leaderAddr == ":9000" || leaderAddr == "" {

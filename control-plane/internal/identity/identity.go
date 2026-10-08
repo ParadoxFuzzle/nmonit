@@ -56,6 +56,7 @@ var (
 	ErrPending         = errors.New("identity: user pending approval")
 	ErrInviteInvalid   = errors.New("identity: invite invalid or expired")
 	ErrInviteExhausted = errors.New("identity: invite exhausted")
+	ErrQuotaExceeded   = errors.New("identity: node quota exceeded")
 )
 
 // User is an identity record (never carries secrets).
