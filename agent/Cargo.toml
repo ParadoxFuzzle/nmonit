@@ -1,6 +1,6 @@
 [package]
 name = "compute-agent"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Distributed compute fabric node agent"
 
@@ -15,6 +15,7 @@ tonic = { version = "0.14", features = ["tls-native-roots"] }
 tonic-prost = "0.14"
 prost = "0.14"
 nvml-wrapper = "0.12"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sysinfo = "0.39"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"

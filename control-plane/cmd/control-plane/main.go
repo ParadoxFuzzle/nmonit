@@ -137,6 +137,16 @@ func main() {
 			Time:                  10 * time.Second,
 			Timeout:               5 * time.Second,
 		}),
+		// The Rust agent (tonic) sends HTTP/2 pings every 10s
+		// (http2_keep_alive_interval). gRPC-Go's default enforcement policy
+		// expects client pings no more often than 5 minutes and kills the
+		// connection with GOAWAY ("got too many pings") otherwise — which
+		// silently evicted every agent ~40s in. Align enforcement with the
+		// server's own Time (10s) so agent keep-alive pings are accepted.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 		// Chain ordering is significant: grpc.ChainUnaryInterceptor runs
 		// the leftmost interceptor first, on the outermost layer. This
 		// ordering records metrics AROUND the auth interceptor, so

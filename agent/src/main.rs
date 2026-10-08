@@ -12,6 +12,20 @@ use clap::Parser;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
+fn main() -> anyhow::Result<()> {
+    // rustls 0.23 requires an explicit process-level CryptoProvider when
+    // both `ring` and `aws-lc-rs` backends are linked (tonic's TLS features
+    // pull both). Pin the `ring` provider before any TLS config is built.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls CryptoProvider");
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
 mod gpu;
 mod heartbeat;
 mod resources;
@@ -74,8 +88,7 @@ struct Args {
     reconnect_backoff_secs: u64,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn async_main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Initialize structured logging (JSON to stdout)
@@ -221,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
-                tracing::error!(error = %e, attempt, "connection to control plane failed");
+                tracing::error!(error = ?e, attempt, "connection to control plane failed");
             }
         }
 

@@ -209,7 +209,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "compute-agent"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -217,6 +217,7 @@ dependencies = [
  "libc",
  "nvml-wrapper",
  "prost",
+ "rustls",
  "sysinfo",
  "thiserror 2.0.18",
  "tokio",
@@ -1055,6 +1056,7 @@ checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
 dependencies = [
  "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",

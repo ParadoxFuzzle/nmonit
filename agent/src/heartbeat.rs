@@ -113,7 +113,9 @@ impl HeartbeatManager {
         let mut endpoint = tonic::transport::Endpoint::from_shared(control_plane_addr.clone())
             .context("invalid control plane address")?
             .connect_timeout(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(10))
+            // NOTE: no .timeout() here — tonic's timeout is a total deadline
+            // per RPC, which would kill the long-lived heartbeat stream at
+            // 10s. Keep-alives below handle dead connections.
             .keep_alive_while_idle(true)
             .http2_keep_alive_interval(std::time::Duration::from_secs(10))
             .keep_alive_timeout(std::time::Duration::from_secs(5));

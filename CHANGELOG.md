@@ -46,9 +46,25 @@ All notable changes to the NMonit project.
 
 ## [Unreleased]
 
-### Changed
+---
+
+## [0.3.0] — 2026-06-22
+
+### Highlights
+
+- **Agent stub modules removed (Phase 2+ deferred work)** — five placeholder modules (`discovery`, `executor`, `memory`, `metrics`, `network`) deleted along with their `Cargo.toml` dependencies (`tower`, `serde`/`serde_json`, `nix`, `tracing-appender`, `metrics-exporter-prometheus`, `uuid`, `tempfile`).
+- **Control-plane split into seven cohesive internal packages** — replaces the 641-line monolithic `cmd/control-plane/main.go` with dedicated `internal/{registry,agent,restapi,validator,tlsreload,metrics}` packages, each with focused responsibility and per-package tests.
+- **CI tooling landed** — `golangci-lint` config + custom `scripts/check-dead-symbols.sh` verification wired into `make lint`; blocks reintroduction of removed identifiers.
+- **Documentation aligned with the native `ParadoxFuzzle/nmonit` namespace** — systemd units, README, CONTRIBUTING, start-cluster script, and Go module path rename.
+- **ARCHITECTURE.md tightened** — descriptive `today` removed from three Phase-1 surface claims where it sat close to slim `currently`-register claims; phase tags now carry the temporal register.
+
+### Fixed
 
 - **`ClusterId` wire format: hand-rolled v7 → real v4 UUID** — control-plane's prefix `cluster-<id>` is now produced by `github.com/google/uuid.NewString()` (v4). The old hand-rolled `uuid7()` bit layout placed a `7` at `ClusterId[14]` (the UUID version nibble); v4 places a `4` there. Any client that parses the version digit at index 14 to detect UUID variant should be updated accordingly. Same-millisecond ClusterId collisions (the documented bug the v7 helper fell back on) are eliminated.
+
+### Changed
+
+- **Module path renamed**: `github.com/compute-nmonit/control-plane` → `github.com/ParadoxFuzzle/control-plane` to match the git remote's native namespace. Out-of-scope (proto `go_package`, `buf.gen.yaml`, regenerated `.pb.go`s) deferred to a follow-up `chore(proto): align go_package` commit.
 
 ---
 

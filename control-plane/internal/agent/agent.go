@@ -241,6 +241,17 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 		return err
 	}
 
+	// Send response headers eagerly. grpc-go defers HEADERS until the first
+	// server message, but the tonic (Rust) agent's streaming call does not
+	// resolve its future until headers arrive — and it only sends its first
+	// heartbeat after that future resolves. Waiting for the first Recv()
+	// deadlocks both sides: the agent hangs inside connect() forever with no
+	// error and no heartbeat ever reaching the registry. Sending empty initial
+	// metadata up front breaks the tie.
+	if err := stream.SendHeader(metadata.MD{}); err != nil {
+		return err
+	}
+
 	first, err := stream.Recv()
 	if err != nil {
 		if err == io.EOF {
