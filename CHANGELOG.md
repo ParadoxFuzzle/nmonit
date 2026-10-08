@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased] — Public-access Phase 1 (identity layer)
+
+### Added
+- **Per-contributor identity layer** (`internal/identity`): users with roles
+  (owner / provider / consumer), per-node tokens (`nmt_...`, stored as sha256
+  hashes — plaintext shown once at issue), invite codes, node-to-user
+  bindings, and a web access-request flow.
+- **`internal/audit`**: append-only audit log (Postgres) recording joins,
+  leaves, auth failures, token lifecycle, and admin actions; `nmonitctl
+  audit tail` to read it.
+- **Admin REST API** (owner API key gated): `/api/v1/admin/users`, `/tokens`,
+  `/invites`, `/requests`, `/audit`.
+- **Public onboarding UI** at `GET/POST /join`: email + optional invite code;
+  requests land as pending for operator approval.
+- **`nmonitctl`** CLI: user/token/invite/request/audit management against the
+  REST API (supports `--ca` for self-signed control planes).
+- **`--pg-dsn` flag** on control-plane: enables the identity layer; empty
+  (default) preserves the legacy shared-token trusted-LAN mode unchanged.
+
+### Changed
+- Agent `Register` now binds the node to the authenticated contributor user
+  when a per-node token is used (bootstrap-token registrations are unbound).
+- gRPC auth resolves credentials via `agent.Authenticator`: shared bootstrap
+  token first, then per-node `nmt_` tokens against the identity store.
+  Disabled/pending users are rejected; `last_used_at` is updated per use.
+
+### Security
+- Node tokens stored only as sha256 hashes; invites stored hashed.
+- Join flow rejects invalid/expired/exhausted invite codes (audit-logged).
+- Auth failures audit-logged with outcome "denied".
+
 All notable changes to the NMonit project.
 
 ---

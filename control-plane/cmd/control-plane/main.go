@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"flag"
 	"net"
 	"net/http"
@@ -23,6 +24,10 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/ParadoxFuzzle/control-plane/internal/audit"
+	"github.com/ParadoxFuzzle/control-plane/internal/identity"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
 	"github.com/ParadoxFuzzle/control-plane/internal/agent"
@@ -52,6 +57,7 @@ func main() {
 		tlsCACert         = flag.String("tls-ca-cert", "", "Path to CA certificate for mTLS (PEM). If set, requires client certs.")
 		requireTLS        = flag.Bool("require-tls", false, "Refuse startup unless TLS is configured (production safety)")
 		tlsReloadInterval = flag.Duration("tls-reload-interval", 60*time.Second, "Interval for polling TLS cert files for changes (0 = disable hot-reload)")
+		pgDSN             = flag.String("pg-dsn", "", "Postgres DSN for the identity layer (e.g. postgres://user:pass@host:5432/db). Empty = legacy shared-token mode.")
 	)
 	flag.Parse()
 
@@ -68,6 +74,32 @@ func main() {
 	if *bootstrap {
 		clusterID = "cluster-" + uuid.NewString()
 	}
+
+	// Identity layer (Phase 1 public-access): optional. When --pg-dsn is set,
+	// agents authenticate with per-node tokens on top of the shared secret.
+	var (
+		identityStore identity.Store
+		aud           *audit.Audit
+		auth          *agent.Authenticator
+	)
+	if *pgDSN != "" {
+		pg, err := identity.NewPGStore(*pgDSN)
+		if err != nil {
+			log.Fatal().Err(err).Msg("identity store unavailable")
+		}
+		defer pg.Close()
+		identityStore = pg
+		log.Info().Msg("identity layer enabled (per-node tokens, invites, audit)")
+	}
+	aud = audit.New(nil)
+	if *pgDSN != "" {
+		if db, err := sql.Open("pgx", *pgDSN); err != nil {
+			log.Fatal().Err(err).Msg("audit db open failed")
+		} else {
+			aud = audit.New(db)
+		}
+	}
+	auth = agent.NewAuthenticator(*agentToken, identityStore, aud)
 
 	leaderAddr := *grpcAddr
 	if leaderAddr == ":9000" || leaderAddr == "" {
@@ -156,7 +188,7 @@ func main() {
 		// the dashboard. Enforced by interceptor_test.go.
 		grpc.ChainUnaryInterceptor(
 			metrics.UnaryServerInterceptor(),
-			agent.AuthUnaryInterceptorFor(*agentToken),
+			auth.UnaryInterceptor(),
 		),
 		grpc.StreamInterceptor(metrics.StreamServerInterceptor()),
 	}
@@ -169,7 +201,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(grpcOpts...)
-	agentServer := agent.NewAgentServer(reg, clusterID, leaderAddr, *agentToken)
+	agentServer := agent.NewAgentServerWithIdentity(reg, clusterID, leaderAddr, auth, aud)
 	computev1.RegisterAgentServiceServer(grpcServer, agentServer)
 
 	go func() {
@@ -184,6 +216,18 @@ func main() {
 	mux.HandleFunc("/health", api.HealthHandler)
 	mux.HandleFunc("/api/v1/nodes", api.RequireAPIKey(api.NodesHandler))
 	mux.Handle("/metrics", api.RequireAPIKey(metrics.Handler().ServeHTTP))
+	if identityStore != nil {
+		ih := restapi.NewIdentityHandlers(identityStore, aud, *apiKey)
+		mux.HandleFunc("/join", ih.JoinHandler)
+		mux.HandleFunc("/api/v1/admin/users", ih.AdminUsersHandler)
+		mux.HandleFunc("/api/v1/admin/users/", ih.AdminUserStatusHandler)
+		mux.HandleFunc("/api/v1/admin/tokens", ih.AdminTokensHandler)
+		mux.HandleFunc("/api/v1/admin/tokens/", ih.AdminTokenRevokeHandler)
+		mux.HandleFunc("/api/v1/admin/invites", ih.AdminInvitesHandler)
+		mux.HandleFunc("/api/v1/admin/requests", ih.AdminRequestsHandler)
+		mux.HandleFunc("/api/v1/admin/audit", ih.AdminAuditHandler)
+		log.Info().Msg("identity layer enabled: /join onboarding + /api/v1/admin/* routes active")
+	}
 
 	httpServer := &http.Server{
 		Addr:              *httpAddr,

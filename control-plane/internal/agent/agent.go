@@ -20,6 +20,7 @@ import (
 	"time"
 
 	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
+	"github.com/ParadoxFuzzle/control-plane/internal/audit"
 	"github.com/ParadoxFuzzle/control-plane/internal/registry"
 	"github.com/ParadoxFuzzle/control-plane/internal/validator"
 	"github.com/rs/zerolog/log"
@@ -39,6 +40,11 @@ type AgentServer struct {
 
 	// Shared secret for agent authentication (empty = no auth).
 	agentToken string
+	// Authenticator resolves shared bootstrap + per-node identity tokens.
+	// nil = legacy shared-token-only behavior.
+	auth *Authenticator
+	// Audit records security events (may be nil when identity is off).
+	audit *audit.Audit
 }
 
 // NewAgentServer constructs an AgentServer wired to the given registry.
@@ -51,10 +57,42 @@ func NewAgentServer(reg *registry.NodeRegistry, clusterID, leaderAddr, agentToke
 	}
 }
 
-// checkAuth applies AgentServer's bearer-token policy to a unary context.
-// Streaming RPCs call this inline (see Heartbeat).
-func (s *AgentServer) checkAuth(ctx context.Context) error {
-	return validateBearerToken(ctx, s.agentToken)
+// NewAgentServerWithIdentity constructs an AgentServer that authenticates via
+// the identity layer (shared bootstrap token + per-node tokens) and binds
+// registered nodes to their owning users. aud may be nil.
+func NewAgentServerWithIdentity(reg *registry.NodeRegistry, clusterID, leaderAddr string, auth *Authenticator, aud *audit.Audit) *AgentServer {
+	return &AgentServer{
+		registry:   reg,
+		clusterID:  clusterID,
+		leaderAddr: leaderAddr,
+		auth:       auth,
+		audit:      aud,
+	}
+}
+
+// checkAuth applies AgentServer's bearer-token policy to a unary context and
+// returns a context carrying the resolved identity.
+func (s *AgentServer) checkAuth(ctx context.Context) (context.Context, error) {
+	if s.auth != nil {
+		return s.auth.Check(ctx, "agent-rpc")
+	}
+	if err := validateBearerToken(ctx, s.agentToken); err != nil {
+		return nil, err
+	}
+	return ctx, nil
+}
+
+// UnaryInterceptor returns a gRPC unary interceptor that authenticates every
+// request via this Authenticator and attaches the resolved identity to the
+// context. Use in grpc.ChainUnaryInterceptor.
+func (a *Authenticator) UnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		ctx, err := a.Check(ctx, "agent-rpc")
+		if err != nil {
+			return nil, err
+		}
+		return handler(ctx, req)
+	}
 }
 
 // AuthUnaryInterceptorFor returns a gRPC unary interceptor that applies
@@ -209,12 +247,28 @@ func validateAll(ctx context.Context, method string, checks []validationCheck) e
 // ============================================================================
 
 func (s *AgentServer) Register(ctx context.Context, req *computev1.RegisterRequest) (*computev1.RegisterResponse, error) {
+	ctx, err := s.checkAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateAll(ctx, "Register", []validationCheck{
 		newCheck("node_id", func() error { return validator.ValidateNodeID(req.NodeId) }),
 		newCheck("address", func() error { return validator.ValidateAddress(req.Address) }),
 		newCheck("agent_version", func() error { return validator.ValidateVersion(req.AgentVersion) }),
 	}); err != nil {
 		return nil, err
+	}
+
+	// Bind the node to its owning user when the identity layer is active.
+	// Bootstrap-token registrations (trusted-LAN / owner) are not bound —
+	// node identity only applies to per-node token holders.
+	if id := IdentityFrom(ctx); id != nil && id.Via == "node-token" && s.auth != nil && s.auth.store != nil {
+		if err := s.auth.store.BindNode(ctx, req.NodeId, id.UserID, id.TokenID); err != nil {
+			log.Error().Err(err).Str("node_id", req.NodeId).Msg("identity: node bind failed")
+		} else {
+			log.Info().Str("node_id", req.NodeId).Str("user", id.Email).
+				Msg("node bound to contributor")
+		}
 	}
 
 	log.Info().
@@ -237,9 +291,11 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 	// Auth check — reject unauthenticated streams before processing.
 	// Stream RPCs can't use the unary interceptor (it wraps a single call,
 	// not an open-ended stream), so checkAuth is called inline here.
-	if err := s.checkAuth(stream.Context()); err != nil {
+	authCtx, err := s.checkAuth(stream.Context())
+	if err != nil {
 		return err
 	}
+	_ = authCtx
 
 	// Send response headers eagerly. grpc-go defers HEADERS until the first
 	// server message, but the tonic (Rust) agent's streaming call does not
