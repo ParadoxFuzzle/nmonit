@@ -88,6 +88,70 @@ func tlsTransport(caFile string, insecure bool) http.RoundTripper {
 	return &http.Transport{TLSClientConfig: tlsCfg}
 }
 
+// flagsFirst moves flag arguments ahead of positional arguments so that
+// `user add <email> --role consumer` behaves like `user add --role consumer
+// <email>`: Go's flag package stops parsing at the first non-flag argument,
+// silently ignoring flags that follow positionals. It assumes every flag
+// takes a value (true for all nmonitctl subcommand flags).
+func flagsFirst(args []string) []string {
+	var flags, pos []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") && i+1 < len(args) {
+			flags = append(flags, args[i], args[i+1])
+			i++
+			continue
+		}
+		pos = append(pos, args[i])
+	}
+	return append(flags, pos...)
+}
+
+// jobCmd implements the owner-facing job subcommands (Phase 2).
+func jobCmd(c *client, args []string) {
+	if len(args) == 0 {
+		fatalf("job: missing subcommand (submit|list|get|cancel)")
+	}
+	switch args[0] {
+	case "submit":
+		fs := flag.NewFlagSet("job submit", flag.ExitOnError)
+		name := fs.String("name", "", "job name")
+		image := fs.String("image", "", "OCI container image")
+		cpu := fs.Float64("cpu", 1, "cpu cores")
+		memGB := fs.Float64("mem-gb", 1, "memory GiB")
+		fs.Parse(flagsFirst(args[1:]))
+		if *name == "" || *image == "" {
+			fatalf("job submit: --name and --image are required")
+		}
+		body := map[string]any{
+			"name": *name, "image": *image,
+			"cpu_cores": *cpu, "mem_bytes": uint64(*memGB * (1 << 30)),
+		}
+		data, code, err := c.do("POST", "/api/v1/jobs", body)
+		exit(err, code)
+		printJSON(data)
+	case "list":
+		data, code, err := c.do("GET", "/api/v1/jobs", nil)
+		exit(err, code)
+		printJSON(data)
+	case "get":
+		if len(args) < 2 {
+			fatalf("job get: missing job id")
+		}
+		data, code, err := c.do("GET", "/api/v1/jobs/"+args[1], nil)
+		exit(err, code)
+		printJSON(data)
+	case "cancel":
+		if len(args) < 2 {
+			fatalf("job cancel: missing job id")
+		}
+		data, code, err := c.do("DELETE", "/api/v1/jobs/"+args[1], nil)
+		exit(err, code)
+		printJSON(data)
+	default:
+		fatalf("job: unknown subcommand %q", args[0])
+	}
+}
+
 func main() {
 	apiURL := flag.String("api-url", envOr("NMONIT_API_URL", "http://127.0.0.1:8080"), "control-plane REST base URL")
 	apiKey := flag.String("api-key", os.Getenv("NMONIT_API_KEY"), "owner API key")
@@ -112,6 +176,13 @@ Commands:
   approve <request-id>                    (creates user + first node token)
   deny <request-id>
   audit tail [--n N]
+  job submit --name NAME --image IMAGE [--cpu N] [--mem-gb N]
+  job list
+  job get <job-id>
+  job cancel <job-id>
+
+  (job commands act as the owner via the API key; consumers submit their
+   own jobs through the REST/gRPC API with their nmt_ token)
 
 Flags:
   --api-url   control-plane base URL (default NMONIT_API_URL or http://127.0.0.1:8080)
@@ -155,6 +226,8 @@ Flags:
 		})
 		exit(err, code)
 		printJSON(data)
+	case "job":
+		jobCmd(c, args[1:])
 	case "audit":
 		if len(args) > 1 && args[1] == "tail" {
 			n := "50"
@@ -181,7 +254,7 @@ func userCmd(c *client, args []string) {
 		fs := flag.NewFlagSet("user add", flag.ExitOnError)
 		role := fs.String("role", "provider", "provider|consumer|owner")
 		name := fs.String("name", "", "display name")
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(flagsFirst(args[1:]))
 		if fs.NArg() < 1 {
 			fatalf("usage: user add <email> --role ...")
 		}
@@ -222,7 +295,7 @@ func tokenCmd(c *client, args []string) {
 	case "issue":
 		fs := flag.NewFlagSet("token issue", flag.ExitOnError)
 		label := fs.String("label", "", "token label")
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(flagsFirst(args[1:]))
 		if fs.NArg() < 1 {
 			fatalf("usage: token issue <email> --label ...")
 		}
@@ -252,7 +325,7 @@ func inviteCmd(c *client, args []string) {
 		role := fs.String("role", "provider", "provider|consumer")
 		maxUses := fs.Int("max-uses", 1, "max uses")
 		expiry := fs.Int("expiry-hours", 72, "expiry in hours")
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(flagsFirst(args[1:]))
 		data, code, err := c.do("POST", "/api/v1/admin/invites", map[string]any{
 			"role": *role, "max_uses": *maxUses, "expiry_hours": *expiry,
 		})
