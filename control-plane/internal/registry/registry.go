@@ -110,6 +110,14 @@ func (r *NodeRegistry) UpdateHeartbeat(nodeID string, _ *computev1.NodeUtilizati
 	metrics.TasksRunning.Set(float64(r.totalTasksLocked()))
 }
 
+// TaskCount returns the number of tasks currently reported by nodeID
+// (0 for unknown nodes). Used by the scheduler's best-fit scoring.
+func (r *NodeRegistry) TaskCount(nodeID string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.nodes[nodeID].Tasks)
+}
+
 // GetAll returns a deep-copied snapshot of the registered nodes as NodeSummary.
 //
 // The CPU/Memory/GPUs proto fields are cloned via proto.Clone on each call

@@ -68,6 +68,11 @@ type User struct {
 	Status      UserStatus
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+
+	// Per-user job quota overrides (Phase 2). nil = use the control
+	// plane's flag defaults (see cmd/control-plane --max-jobs-*).
+	MaxJobsRunning *int
+	MaxJobsQueued  *int
 }
 
 // NodeToken is a per-contributor credential metadata record. The raw secret

@@ -31,6 +31,7 @@ import (
 
 	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
 	"github.com/ParadoxFuzzle/control-plane/internal/agent"
+	"github.com/ParadoxFuzzle/control-plane/internal/jobs"
 	"github.com/ParadoxFuzzle/control-plane/internal/metrics"
 	"github.com/ParadoxFuzzle/control-plane/internal/registry"
 	"github.com/ParadoxFuzzle/control-plane/internal/restapi"
@@ -58,6 +59,12 @@ func main() {
 		requireTLS        = flag.Bool("require-tls", false, "Refuse startup unless TLS is configured (production safety)")
 		tlsReloadInterval = flag.Duration("tls-reload-interval", 60*time.Second, "Interval for polling TLS cert files for changes (0 = disable hot-reload)")
 		pgDSN             = flag.String("pg-dsn", "", "Postgres DSN for the identity layer (e.g. postgres://user:pass@host:5432/db). Empty = legacy shared-token mode.")
+
+		// Phase 2 job quotas (defaults when a user has no override).
+		maxJobsRunning = flag.Int("max-jobs-running", 2, "Default max running+scheduling jobs per consumer")
+		maxJobsQueued  = flag.Int("max-jobs-queued", 5, "Default max queued jobs per consumer")
+		maxJobCores    = flag.Float64("max-job-cores", 4, "Max cpu_cores a single consumer job may request")
+		maxJobMemGB    = flag.Float64("max-job-mem-gb", 8, "Max memory (GiB) a single consumer job may request")
 	)
 	flag.Parse()
 
@@ -102,6 +109,20 @@ func main() {
 	auth = agent.NewAuthenticator(*agentToken, identityStore, aud)
 	auth.SetRateLimiter(20, 40) // per-credential: 20 req/s, burst 40
 
+	// Phase 2 job-layer config (store/hub/scheduler are created after the
+	// node registry below).
+	quotaDefaults := jobs.QuotaDefaults{
+		MaxRunning:     *maxJobsRunning,
+		MaxQueued:      *maxJobsQueued,
+		MaxJobCores:    float32(*maxJobCores),
+		MaxJobMemBytes: uint64(*maxJobMemGB * float64(1<<30)),
+	}
+	var (
+		jobStore    jobs.Store
+		dispatchHub *jobs.Hub
+		scheduler   *jobs.Scheduler
+	)
+
 	leaderAddr := *grpcAddr
 	if leaderAddr == ":9000" || leaderAddr == "" {
 		leaderAddr = "localhost:9000"
@@ -117,6 +138,30 @@ func main() {
 		Msg("compute-control-plane starting")
 
 	reg := registry.NewNodeRegistry()
+
+	// Phase 2 job layer: same Postgres DB as the identity layer. Enabled
+	// whenever --pg-dsn is set; hub feeds TaskSpecs to agents through their
+	// heartbeat streams, scheduler assigns queued jobs best-fit.
+	if *pgDSN != "" {
+		db, err := sql.Open("pgx", *pgDSN)
+		if err != nil {
+			log.Fatal().Err(err).Msg("job store db open failed")
+		}
+		js, err := jobs.NewPGStore(db)
+		if err != nil {
+			log.Fatal().Err(err).Msg("job store unavailable")
+		}
+		jobStore = js
+		dispatchHub = jobs.NewHub(jobStore, aud)
+		scheduler = jobs.NewScheduler(dispatchHub, reg, jobStore, aud,
+			quotaDefaults.MaxJobCores, quotaDefaults.MaxJobMemBytes)
+		log.Info().
+			Int("max_jobs_running", quotaDefaults.MaxRunning).
+			Int("max_jobs_queued", quotaDefaults.MaxQueued).
+			Float64("max_job_cores", *maxJobCores).
+			Float64("max_job_mem_gb", *maxJobMemGB).
+			Msg("job layer enabled (submit, quotas, best-fit dispatch)")
+	}
 
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 	defer cleanupCancel()
@@ -203,7 +248,12 @@ func main() {
 
 	grpcServer := grpc.NewServer(grpcOpts...)
 	agentServer := agent.NewAgentServerWithIdentity(reg, clusterID, leaderAddr, auth, aud)
+	agentServer.SetJobDispatch(dispatchHub, scheduler)
 	computev1.RegisterAgentServiceServer(grpcServer, agentServer)
+	if jobStore != nil {
+		jobServer := agent.NewJobServer(auth, jobStore, identityStore, dispatchHub, scheduler, aud, quotaDefaults)
+		computev1.RegisterJobServiceServer(grpcServer, jobServer)
+	}
 
 	go func() {
 		log.Info().Str("addr", *grpcAddr).Msg("gRPC server starting")
@@ -228,6 +278,12 @@ func main() {
 		mux.HandleFunc("/api/v1/admin/requests", ih.AdminRequestsHandler)
 		mux.HandleFunc("/api/v1/admin/audit", ih.AdminAuditHandler)
 		log.Info().Msg("identity layer enabled: /join onboarding + /api/v1/admin/* routes active")
+	}
+	if jobStore != nil {
+		jh := restapi.NewJobsHandlers(jobStore, identityStore, aud, dispatchHub, scheduler, quotaDefaults, *apiKey)
+		mux.HandleFunc("/api/v1/jobs", jh.JobsHandler)
+		mux.HandleFunc("/api/v1/jobs/", jh.JobHandler)
+		log.Info().Msg("job API enabled: /api/v1/jobs (submit/list/get/cancel)")
 	}
 
 	httpServer := &http.Server{

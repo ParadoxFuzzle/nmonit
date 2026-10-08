@@ -70,3 +70,7 @@ CREATE INDEX IF NOT EXISTS audit_log_action_idx ON audit_log (action);
 
 -- Per-user node quota (NULL = default 3).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS max_nodes INT;
+
+-- Per-user job quotas, Phase 2 (NULL = control-plane flag defaults).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS max_jobs_running INT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS max_jobs_queued INT;

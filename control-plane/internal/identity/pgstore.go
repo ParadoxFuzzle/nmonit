@@ -87,14 +87,16 @@ func (p *PGStore) CreateUser(ctx context.Context, u User) error {
 
 func (p *PGStore) GetUser(ctx context.Context, id string) (User, error) {
 	row := p.db.QueryRowContext(ctx,
-		`SELECT id, email, display_name, role, status, created_at, updated_at
+		`SELECT id, email, display_name, role, status, created_at, updated_at,
+		        max_jobs_running, max_jobs_queued
 		 FROM users WHERE id=$1`, id)
 	return scanUser(row)
 }
 
 func (p *PGStore) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := p.db.QueryRowContext(ctx,
-		`SELECT id, email, display_name, role, status, created_at, updated_at
+		`SELECT id, email, display_name, role, status, created_at, updated_at,
+		        max_jobs_running, max_jobs_queued
 		 FROM users WHERE email=$1`, email)
 	return scanUser(row)
 }
@@ -102,8 +104,9 @@ func (p *PGStore) GetUserByEmail(ctx context.Context, email string) (User, error
 func scanUser(row interface{ Scan(...any) error }) (User, error) {
 	var u User
 	var role, status string
+	var maxRunning, maxQueued *int
 	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &role, &status,
-		&u.CreatedAt, &u.UpdatedAt)
+		&u.CreatedAt, &u.UpdatedAt, &maxRunning, &maxQueued)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -112,12 +115,15 @@ func scanUser(row interface{ Scan(...any) error }) (User, error) {
 	}
 	u.Role = Role(role)
 	u.Status = UserStatus(status)
+	u.MaxJobsRunning = maxRunning
+	u.MaxJobsQueued = maxQueued
 	return u, nil
 }
 
 func (p *PGStore) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := p.db.QueryContext(ctx,
-		`SELECT id, email, display_name, role, status, created_at, updated_at
+		`SELECT id, email, display_name, role, status, created_at, updated_at,
+		        max_jobs_running, max_jobs_queued
 		 FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
