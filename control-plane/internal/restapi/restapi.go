@@ -132,14 +132,17 @@ func gpuSummary(gs []*computev1.GpuResources) []GPUSummary {
 	if len(gs) == 0 {
 		return []GPUSummary{}
 	}
-	out := make([]GPUSummary, len(gs))
-	for i, g := range gs {
-		out[i] = GPUSummary{
+	out := make([]GPUSummary, 0, len(gs))
+	for _, g := range gs {
+		if g == nil {
+			continue
+		}
+		out = append(out, GPUSummary{
 			Index:  int(g.Index),
 			Vendor: g.Vendor,
 			Model:  g.Model,
 			VRamGB: bytesToGB(g.VramBytes),
-		}
+		})
 	}
 	return out
 }
@@ -172,6 +175,9 @@ func utilizationSummary(u *computev1.NodeUtilization) *UtilizationSummary {
 		}
 	}
 	for _, g := range u.Gpus {
+		if g == nil {
+			continue
+		}
 		out.GPUs = append(out.GPUs, GPUUtilizationSummary{
 			Index:          int(g.Index),
 			GPUPercent:     g.GpuPercent,

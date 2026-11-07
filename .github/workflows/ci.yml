@@ -8,10 +8,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   go-control-plane:
     name: Go control plane
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: control-plane
@@ -29,6 +34,7 @@ jobs:
   go-cli:
     name: Go CLI
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: cli
@@ -48,6 +54,7 @@ jobs:
   rust-agent:
     name: Rust agent
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install protoc
@@ -56,7 +63,9 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt -p compute-agent -- --check
       - name: Tests
         run: cargo test -p compute-agent
       - name: Clippy
-        run: cargo clippy -p compute-agent -- -D warnings
+        run: cargo clippy -p compute-agent --all-targets -- -D warnings

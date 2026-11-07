@@ -166,6 +166,16 @@ func TestGPUSummary(t *testing.T) {
 	}
 }
 
+func TestGPUSummary_SkipsNil(t *testing.T) {
+	got := gpuSummary([]*computev1.GpuResources{nil, {Index: 2, Vendor: "amd"}})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 non-nil GPU, got %d", len(got))
+	}
+	if got[0].Index != 2 || got[0].Vendor != "amd" {
+		t.Errorf("unexpected GPU summary: %#v", got[0])
+	}
+}
+
 func TestUtilizationSummary_Nil(t *testing.T) {
 	if got := utilizationSummary(nil); got != nil {
 		t.Errorf("expected nil utilization summary, got %#v", got)
@@ -186,7 +196,7 @@ func TestUtilizationSummary(t *testing.T) {
 			UsedBytes:      4 * 1024 * 1024 * 1024,
 			AvailableBytes: 12 * 1024 * 1024 * 1024,
 		},
-		Gpus: []*computev1.GpuUtilization{{
+		Gpus: []*computev1.GpuUtilization{nil, {
 			Index:              0,
 			GpuPercent:         50,
 			MemoryPercent:      25,

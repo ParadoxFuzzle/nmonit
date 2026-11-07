@@ -269,6 +269,10 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 		return status.Errorf(codes.FailedPrecondition, "node %q is not registered; register before opening a heartbeat stream", nodeID)
 	}
 
+	// Every return path closes this stream. Remove the node unless it has
+	// already re-registered under a newer connection ID.
+	defer s.registry.RemoveIfConnectionMatches(nodeID, connID)
+
 	log.Info().Str("node_id", nodeID).Uint64("conn_id", connID).Msg("heartbeat stream opened")
 
 	if !s.registry.UpdateHeartbeat(nodeID, connID, first.Utilization, first.Tasks) {
@@ -308,12 +312,10 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 		req, err := stream.Recv()
 		if err == io.EOF {
 			log.Info().Str("node_id", nodeID).Msg("heartbeat stream closed")
-			s.registry.RemoveIfConnectionMatches(nodeID, connID)
 			return nil
 		}
 		if err != nil {
 			log.Warn().Err(err).Str("node_id", nodeID).Msg("heartbeat stream error")
-			s.registry.RemoveIfConnectionMatches(nodeID, connID)
 			return err
 		}
 

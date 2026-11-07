@@ -233,6 +233,9 @@ func fetchJSON(opts *options, path string, out any) error {
 func newHTTPClient(opts *options) (*http.Client, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if opts.caCert != "" {
+		if !strings.HasPrefix(strings.ToLower(opts.server), "https://") {
+			return nil, fmt.Errorf("--ca-cert requires an https:// server URL")
+		}
 		pem, err := os.ReadFile(opts.caCert)
 		if err != nil {
 			return nil, fmt.Errorf("read CA certificate: %w", err)
@@ -309,15 +312,19 @@ func formatMemory(n node) string {
 }
 
 func formatGPUs(n node) string {
-	if len(n.GPUs) == 0 {
-		return "-"
+	var utilization []gpuUtilization
+	if n.Utilization != nil {
+		utilization = n.Utilization.GPUs
 	}
-	if n.Utilization == nil || len(n.Utilization.GPUs) == 0 {
+	if len(utilization) == 0 {
+		if len(n.GPUs) == 0 {
+			return "-"
+		}
 		return fmt.Sprintf("%d", len(n.GPUs))
 	}
 
-	parts := make([]string, 0, len(n.Utilization.GPUs))
-	for _, g := range n.Utilization.GPUs {
+	parts := make([]string, 0, len(utilization))
+	for _, g := range utilization {
 		parts = append(parts, fmt.Sprintf("%d: %.0f%% %.1f/%.1f GB",
 			g.Index, g.GPUPercent, g.VRAMUsedGB, g.VRAMTotalGB))
 	}

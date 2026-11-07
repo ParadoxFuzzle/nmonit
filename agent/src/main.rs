@@ -167,6 +167,8 @@ async fn main() -> anyhow::Result<()> {
                 let heartbeat_dur = Duration::from_millis(heartbeat_interval_ms.max(1000));
 
                 let mut heartbeat_tick = tokio::time::interval(heartbeat_dur);
+                // Avoid a burst of catch-up heartbeats after a long stall.
+                heartbeat_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 let mut sequence: u64 = 0; // Start at 0 since connect() sends seq=0
 
                 // Consume the first immediate tick so we don't double-fire
@@ -191,11 +193,28 @@ async fn main() -> anyhow::Result<()> {
                                     tracing::error!(error = %e, "spawn_blocking panicked in collect_utilization");
                                     crate::compute::v1::NodeUtilization::default()
                                 });
-                            if let Err(e) = conn.send_heartbeat(sequence, util).await {
-                                tracing::error!(error = %e, "failed to send heartbeat");
-                                break true; // stream ended, reconnect
+                            // Bound the send so a wedged stream cannot block
+                            // shutdown or instruction handling indefinitely.
+                            match tokio::time::timeout(
+                                heartbeat_dur,
+                                conn.send_heartbeat(sequence, util),
+                            )
+                            .await
+                            {
+                                Ok(Ok(())) => tracing::debug!(sequence, "heartbeat sent"),
+                                Ok(Err(e)) => {
+                                    tracing::error!(error = %e, "failed to send heartbeat");
+                                    break true; // stream ended, reconnect
+                                }
+                                Err(_) => {
+                                    tracing::error!(
+                                        sequence,
+                                        timeout_ms = heartbeat_dur.as_millis() as u64,
+                                        "heartbeat send timed out"
+                                    );
+                                    break true;
+                                }
                             }
-                            tracing::debug!(sequence, "heartbeat sent");
                         }
 
                         // --- Receive instructions from control plane ---

@@ -63,9 +63,16 @@ All notable changes to the NMonit project.
 - **Development certificates failed hostname verification** — generated server certs now carry SANs for `control-plane`, `localhost`, `127.0.0.1`, and `::1`, plus server/client EKU and CA constraints.
 - **Agent could panic on a poisoned resource mutex** — `discover_resources` now recovers the poisoned guard like `collect_utilization` already did.
 - **Agent Docker build used Rust 1.78** — bumped to Rust 1.95, matching edition 2024 and the `sysinfo` MSRV.
+- **CLI silently ignored `--ca-cert` over HTTP** — it now rejects a CA certificate unless the server URL is `https://`, preventing an API key from being sent in plaintext while TLS was expected.
+- **CLI hid GPU utilization without static GPU metadata** — utilization rows are now shown even when the resources list is empty.
+- **Heartbeat handler left nodes registered on early returns** — cleanup now runs on every stream exit path, while connection-ID matching protects re-registered nodes.
+- **A wedged heartbeat stream could block the agent loop** — sends are bounded by the heartbeat interval, and missed ticks are skipped instead of bursting afterward.
+- **REST summaries panicked on nil GPU entries** — nil repeated-message entries are skipped in both static and utilization mappings.
+- **Stale cleanup logged while holding the registry write lock** — logging now happens after unlock so a slow log sink cannot stall heartbeats.
 
 ### Changed
 
+- **CI now cancels superseded runs and has per-job timeouts** — Rust formatting is checked and clippy covers all targets.
 - **Docker Compose dev profile documented correctly** — the development control plane requires `--profile dev`; plain `docker compose up` only starts monitoring.
 - **Proto Go package paths and Cargo repository now match the real module** — `go_package`/`go_package_prefix` point at `github.com/ParadoxFuzzle/control-plane`, and the workspace repository points at `ParadoxFuzzle/nmonit`.
 - **`ClusterId` wire format: hand-rolled v7 → real v4 UUID** — control-plane's prefix `cluster-<id>` is now produced by `github.com/google/uuid.NewString()` (v4). The old hand-rolled `uuid7()` bit layout placed a `7` at `ClusterId[14]` (the UUID version nibble); v4 places a `4` there. Any client that parses the version digit at index 14 to detect UUID variant should be updated accordingly. Same-millisecond ClusterId collisions (the documented bug the v7 helper fell back on) are eliminated.

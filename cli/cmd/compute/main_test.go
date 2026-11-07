@@ -44,3 +44,29 @@ func TestFormatGPUsWithoutUtilization(t *testing.T) {
 		t.Errorf("expected static GPU count, got %q", got)
 	}
 }
+
+func TestFormatGPUsWithoutStaticResources(t *testing.T) {
+	n := node{
+		Utilization: &nodeUtilization{
+			GPUs: []gpuUtilization{{
+				Index:       0,
+				GPUPercent:  25,
+				VRAMUsedGB:  2,
+				VRAMTotalGB: 8,
+			}},
+		},
+	}
+	if got := formatGPUs(n); got != "0: 25% 2.0/8.0 GB" {
+		t.Errorf("expected utilization GPU format, got %q", got)
+	}
+}
+
+func TestNewHTTPClientRejectsCAOverHTTP(t *testing.T) {
+	_, err := newHTTPClient(&options{
+		server: "http://localhost:8080",
+		caCert: "/tmp/does-not-matter.pem",
+	})
+	if err == nil {
+		t.Fatal("expected --ca-cert over HTTP to be rejected")
+	}
+}

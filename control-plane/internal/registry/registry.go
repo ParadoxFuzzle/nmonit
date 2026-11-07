@@ -221,20 +221,31 @@ func (r *NodeRegistry) StaleNodeCleanup(ctx context.Context, threshold time.Dura
 		case <-ticker.C:
 			r.mu.Lock()
 			now := time.Now()
-			removed := 0
+			var stale []struct {
+				id    string
+				since time.Duration
+			}
 			for id, info := range r.nodes {
-				if now.Sub(info.LastBeat) > threshold {
+				if since := now.Sub(info.LastBeat); since > threshold {
 					delete(r.nodes, id)
-					removed++
-					log.Warn().Str("node_id", id).Dur("since_last_beat", now.Sub(info.LastBeat)).Msg("node marked offline (stale)")
+					stale = append(stale, struct {
+						id    string
+						since time.Duration
+					}{id: id, since: since})
 				}
 			}
-			if removed > 0 {
-				metrics.StaleNodesRemoved.Add(float64(removed))
+			if len(stale) > 0 {
+				metrics.StaleNodesRemoved.Add(float64(len(stale)))
 				metrics.RegisteredNodes.Set(float64(len(r.nodes)))
 				metrics.TasksRunning.Set(float64(r.totalTasksLocked()))
 			}
 			r.mu.Unlock()
+
+			// Logging can block on stderr; do it after releasing the registry
+			// lock so a slow log sink cannot stall heartbeats.
+			for _, node := range stale {
+				log.Warn().Str("node_id", node.id).Dur("since_last_beat", node.since).Msg("node marked offline (stale)")
+			}
 		}
 	}
 }
