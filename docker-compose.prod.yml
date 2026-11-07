@@ -1,0 +1,100 @@
+# Production overlay — TLS control plane, authenticated metrics, secured Grafana.
+#
+# Usage:
+#   cp .env.example .env                 # then replace every value
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d
+#
+# Required .env values:
+#   NMONIT_API_KEY, NMONIT_AGENT_TOKEN,
+#   GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD
+#
+# Generate development certs with scripts/gen-certs.sh; production deployments
+# should use certificates from their own CA.
+
+services:
+  control-plane-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.control-plane
+    container_name: nmonit-control-plane-prod
+    networks:
+      default:
+        aliases:
+          - "control-plane"
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+    volumes:
+      - ./deploy/certs/server.crt:/certs/server.crt:ro
+      - ./deploy/certs/server.key:/certs/server.key:ro
+      - ./deploy/certs/ca.crt:/certs/ca.crt:ro
+    command:
+      - "--grpc-addr=:9000"
+      - "--http-addr=:8080"
+      - "--log-level=info"
+      - "--bootstrap"
+      - "--require-tls"
+      - "--tls-cert=/certs/server.crt"
+      - "--tls-key=/certs/server.key"
+      - "--tls-ca-cert=/certs/ca.crt"
+      - "--tls-reload-interval=30s"
+      - "--api-key=${NMONIT_API_KEY:?set NMONIT_API_KEY in .env (see .env.example)}"
+      - "--agent-token=${NMONIT_AGENT_TOKEN:?set NMONIT_AGENT_TOKEN in .env (see .env.example)}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  prometheus-prod:
+    profiles: ["prod"]
+    image: prom/prometheus:v2.51.0
+    container_name: nmonit-prometheus-prod
+    networks:
+      default:
+        aliases:
+          - "prometheus"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/certs/ca.crt:/etc/prometheus/certs/ca.crt:ro
+      - prometheus_data:/prometheus
+    secrets:
+      - nmonit_api_key
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    security_opt:
+      - "no-new-privileges:true"
+    restart: unless-stopped
+
+  grafana-prod:
+    profiles: ["prod"]
+    image: grafana/grafana:10.4.0
+    container_name: nmonit-grafana-prod
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - "GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?set GRAFANA_ADMIN_USER in .env (see .env.example)}"
+      - "GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env (see .env.example)}"
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/dashboards/nmonit.yml:/etc/grafana/provisioning/dashboards/nmonit.yml:ro
+      - ./deploy/grafana/nmonit-dashboard.json:/var/lib/grafana/dashboards/nmonit-dashboard.json:ro
+    security_opt:
+      - "no-new-privileges:true"
+    restart: unless-stopped
+
+secrets:
+  nmonit_api_key:
+    environment: NMONIT_API_KEY

@@ -1,31 +1,19 @@
-# Only control-plane/ and cli/ are needed for the Docker builds — exclude
-# everything else to keep the build context small and avoid cache invalidation
-# from irrelevant file changes.
+# The Dockerfiles build from the project root. Keep the context small by
+# excluding build artifacts, secrets, and files no image needs.
 
-# Rust crates (agent, storage, network)
-agent/
-storage/
-network/
-
-# cli/ is intentionally included: Dockerfile.cli builds from it.
-# Protobuf definitions
-proto/
-
-# SDKs (C, Go, Python, Rust)
-sdk/
-
-# Frontend/UI
-dashboard/
+# Build artifacts
+bin/
+target/
 
 # Development scripts
 scripts/
 
-# Deployment certs (large binary files)
+# Deployment certs (large binary files, mounted at runtime instead)
 deploy/certs/
 
-# Rust workspace files
-Cargo.toml
-Cargo.lock
+# Secrets
+.env
+.env.*
 
 # Build tools
 Makefile
@@ -33,6 +21,9 @@ Makefile
 # Documentation
 README.md
 ARCHITECTURE.md
+docs/
+CONTRIBUTING.md
+CHANGELOG.md
 
 # Git
 .git/

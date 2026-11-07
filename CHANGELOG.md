@@ -52,8 +52,19 @@ All notable changes to the NMonit project.
 - **`compute` CLI** — `status`, `watch`, `health`, and `version` commands with API-key auth, optional CA certificate, JSON output, and a node utilization table. Buildable with `make cli` and `deploy/docker/Dockerfile.cli`.
 - **Live node utilization in REST** — `/api/v1/nodes` now includes a `utilization` object with CPU load/percentages, memory usage, and GPU/VRAM/temperature/power/clock data from heartbeats.
 
+### Security
+
+- **Production Compose now requires secrets** — the prod overlay refuses to start without `NMONIT_API_KEY`, `NMONIT_AGENT_TOKEN`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD`. The Grafana default `admin/admin` credentials are development-only.
+- **Prometheus metrics scraping is authenticated in production** — the control plane accepts `Authorization: Bearer` API keys, and the prod Prometheus overlay reads the key from a Docker secret and verifies the control-plane CA.
+
+### Removed
+
+- **Placeholder SDK, dashboard, network, and storage trees** — removed empty scaffolding that advertised capabilities not present in the codebase. Future work is tracked in `docs/ROADMAP.md`.
+
 ### Fixed
 
+- **CLI `watch` leaked HTTP connections** — the CLI now lazily builds one HTTP client per invocation and reuses its transport across refreshes instead of creating a new client for every request.
+- **Agent ignored SIGTERM and could miss shutdown during reconnect** — one SIGINT/SIGTERM future is now polled around connection attempts, backoff, and the live heartbeat stream.
 - **Heartbeat stream never opened** — the agent awaited the bidirectional `Heartbeat` call before sending its first message, while the server waited for that message before returning response headers. The stream timed out after 10s and no heartbeats were delivered. The initial request is now queued before opening the stream.
 - **mTLS panicked during startup** — `tonic` was compiled with native roots but no rustls crypto provider. Enabled the `tls-ring` feature so the agent can install a provider.
 - **Control-plane crash on nil registration resources** — `Register` now rejects a nil `NodeResources` with `InvalidArgument` before it reaches the registry.
@@ -73,6 +84,9 @@ All notable changes to the NMonit project.
 
 ### Changed
 
+- **Docs now describe the implemented surface** — README, architecture, contributing, and API docs distinguish current inventory/heartbeat/metrics behavior from the roadmap. Added `docs/API.md`, `docs/DEVELOPMENT.md`, and `docs/ROADMAP.md`.
+- **`make` and `make dev` no longer require `buf`** — protobuf generation remains an explicit `make proto` target.
+- **Production Compose moved to an overlay** — `docker-compose.yml` is the development stack; `docker-compose.prod.yml` adds the hardened production services. This keeps required prod secrets from blocking dev startup.
 - **CI now cancels superseded runs and has per-job timeouts** — Rust formatting is checked, clippy covers all targets, and checkout/setup-go use their Node 24 releases.
 - **Docker Compose dev profile documented correctly** — the development control plane requires `--profile dev`; plain `docker compose up` only starts monitoring.
 - **Proto Go package paths and Cargo repository now match the real module** — `go_package`/`go_package_prefix` point at `github.com/ParadoxFuzzle/control-plane`, and the workspace repository points at `ParadoxFuzzle/nmonit`.

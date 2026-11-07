@@ -13,7 +13,7 @@ RED    := \033[0;31m
 NC     := \033[0m # No Color
 
 .PHONY: all
-all: proto agent control-plane cli ## Build everything
+all: agent control-plane cli ## Build all implemented binaries
 
 # ============================================================================
 # Protobuf
@@ -131,7 +131,7 @@ docker-control-plane: ## Build control plane Docker image
 # ============================================================================
 
 .PHONY: dev
-dev: proto agent-dev control-plane-dev ## Fast development build
+dev: agent-dev control-plane-dev ## Fast development build
 
 .PHONY: watch-agent
 watch-agent: ## Watch agent for changes and rebuild

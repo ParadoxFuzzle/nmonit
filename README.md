@@ -1,118 +1,139 @@
-# Distributed Compute Fabric
+# nmonit
 
-> Pool VRAM, RAM, CPU, and GPU across networked devices into a unified compute layer.
+> Pre-alpha hardware inventory and live utilization for a LAN compute cluster.
 
 [![Rust](https://img.shields.io/badge/agent-Rust-orange)](agent/)
 [![Go](https://img.shields.io/badge/control__plane-Go-00ADD8)](control-plane/)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-red)]()
 [![CI](https://github.com/ParadoxFuzzle/nmonit/actions/workflows/ci.yml/badge.svg)](https://github.com/ParadoxFuzzle/nmonit/actions/workflows/ci.yml)
 
 ---
 
-## What Is This?
+## What works today
 
-A distributed compute fabric that aggregates hardware resources across multiple machines on a LAN and presents them as a single unified pool. Applications request what they need (memory, compute, GPU), and the fabric decides where to place it — the application doesn't need to know the cluster topology.
+nmonit currently gives you a working LAN inventory and monitoring plane:
 
-**Example:** Run an LLM that needs 48GB VRAM on a cluster where no single GPU has more than 24GB. The fabric shards the model across two GPUs on different nodes transparently.
+- A Rust agent discovers CPU, RAM, GPU, storage, and network hardware, registers with the control plane, and streams heartbeats.
+- Heartbeats carry live CPU, memory, and NVIDIA GPU utilization (percentage, VRAM, temperature, power, clocks).
+- A Go control plane keeps an in-memory node registry, removes stale nodes, exposes Prometheus metrics, and serves a small REST API.
+- The `compute` CLI provides `health`, `status`/`nodes`, `watch`, and `version`.
+- Optional TLS/mTLS, API-key and agent-token authentication, and certificate hot reload are implemented.
+- Docker Compose development and production overlays plus systemd units are included.
+
+This is **not** yet a job-execution or distributed-memory system. Those capabilities are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Architecture
 
 ```
-Application (SDK/CLI/REST)
-         │
-    ┌────▼─────┐
-    │ Control   │   Go  ·  gRPC  ·  Raft  ·  Prometheus
-    │ Plane     │   Scheduler, API, Resource Manager
-    └────┬─────┘
-         │
-    ┌────┼────┐
-    │    │    │
-┌───▼─┐┌─▼───┐┌▼───┐
-│Node ││Node ││Node │   Rust  ·  UCX  ·  NVML  ·  containerd
-│  A  ││  B  ││  C  │   Agent, Executor, Memory Manager
-└─────┘└─────┘└─────┘
-    │    │    │
-    └────┼────┘
-   RDMA / RoCE / TCP
+          compute CLI ────── REST / HTTPS ──────┐
+                                                │
+          Prometheus ─────── /metrics ──────────┤
+                                                ▼
+                                   ┌──────────────────────────┐
+                                   │ Go control plane         │
+                                   │ in-memory node registry  │
+                                   │ REST + gRPC + metrics    │
+                                   └────────────▲─────────────┘
+                                                │
+                                  gRPC Register / Heartbeat
+                                                │
+                     ┌──────────────────────────┼──────────────────────────┐
+                     │                          │                          │
+              ┌──────▼──────┐           ┌───────▼─────┐            ┌───────▼─────┐
+              │ Rust agent  │           │ Rust agent  │            │ Rust agent  │
+              │ CPU/RAM/GPU │           │ CPU/RAM/GPU │            │ CPU/RAM/GPU │
+              └─────────────┘           └─────────────┘            └─────────────┘
 ```
+
+The control plane is a single process. There is no scheduler, persistence layer, Raft consensus, or distributed execution yet.
 
 ## Getting Started
 
-> ⚠️ **Pre-alpha.** This project is in active development. Phase 1 implementation is underway.
-
 ### Prerequisites
 
-- **All nodes:** Linux kernel 5.15+, systemd
-- **GPU nodes:** NVIDIA drivers 535+, NVML
-- **RDMA (optional):** RDMA-capable NICs (Mellanox ConnectX-4+, RoCE v2)
-- **Build tools:** Rust 1.95+, Go 1.25+, Protocol Buffers (buf)
+- **Go 1.25+** — control plane and CLI
+- **Rust 1.95+** — node agent
+- **Linux** — the agent probes Linux sysfs/procfs and NVIDIA NVML
+- **NVIDIA drivers + NVML** — only for GPU utilization; CPU/memory monitoring works without a GPU
+- **Docker + Docker Compose** — optional containerised stack
+- **buf** — only when regenerating protobuf code
 
-### Quick Start
-
-The control plane, agent registration/heartbeats, and the read-only `compute` CLI work today. Job submission is still under construction.
+### Build and run locally
 
 ```bash
-# Build the control plane, agent, and CLI
 make
 
-# Start the control plane (first node)
-./bin/control-plane --bootstrap --api-key dev-key
+# Start the control plane (first node, local development)
+./bin/control-plane --bootstrap --api-key dev-key --agent-token dev-agent-token
 
-# Start node agents on each machine
-./target/release/compute-agent --control-plane 192.168.1.10:9000
+# Start an agent on this machine
+./target/release/compute-agent \
+  --control-plane http://localhost:9000 \
+  --agent-token dev-agent-token
 
-# Check the control plane from another shell
-./bin/compute --server http://192.168.1.10:8080 --api-key dev-key health
-./bin/compute --server http://192.168.1.10:8080 --api-key dev-key status
-./bin/compute --server http://192.168.1.10:8080 --api-key dev-key watch
+# Inspect the cluster
+./bin/compute --server http://localhost:8080 --api-key dev-key health
+./bin/compute --server http://localhost:8080 --api-key dev-key status
+./bin/compute --server http://localhost:8080 --api-key dev-key watch
 ```
 
+The plaintext/no-TLS setup above is for local development only. The agent logs a warning when TLS is not configured.
+
 The CLI also accepts `NMONIT_SERVER`, `NMONIT_API_KEY`, and `NMONIT_CA_CERT`, and supports `--json` for scripting.
+
+### Docker development stack
+
+```bash
+docker compose --profile dev up -d
+```
+
+This starts the control plane, Prometheus, and Grafana with development defaults. Grafana uses `admin / admin` in this profile only.
+
+### Production stack
+
+```bash
+cp .env.example .env
+# Replace every value in .env. Generate secrets with: openssl rand -hex 32
+
+bash scripts/gen-certs.sh deploy/certs
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.prod.yml \
+  --profile prod up -d
+```
+
+The production overlay requires `NMONIT_API_KEY`, `NMONIT_AGENT_TOKEN`, `GRAFANA_ADMIN_USER`, and `GRAFANA_ADMIN_PASSWORD`. It enables TLS, agent-token and REST API-key auth, authenticated HTTPS Prometheus scraping, and has no default Grafana password. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Project Structure
 
 | Directory | Language | Purpose |
 |---|---|---|
-| `proto/` | Protobuf | Wire protocol definitions (single source of truth) |
-| `agent/` | Rust | Node agent: resource reporting, task execution, memory management |
-| `control-plane/` | Go | Scheduler, REST API, resource manager, Raft consensus |
-| `cli/` | Go | CLI tool (`compute`) |
-| `sdk/c/` | C | Native C SDK |
-| `sdk/python/` | Python | Python bindings + numpy-compatible distributed arrays |
-| `sdk/go/` | Go | Go client library |
-| `network/` | Rust | Network fabric library (RDMA/TCP) |
-| `storage/` | Rust | Distributed storage (FUSE + S3) |
-| `dashboard/` | — | Web dashboard (future) |
+| `proto/` | Protobuf | Wire protocol definitions |
+| `agent/` | Rust | Node agent: hardware discovery, registration, heartbeats, utilization |
+| `control-plane/` | Go | Node registry, gRPC AgentService, REST API, Prometheus metrics |
+| `cli/` | Go | `compute` CLI |
+| `deploy/` | YAML / Docker | Dockerfiles, Compose, Prometheus, Grafana, systemd |
+| `scripts/` | Shell | Development certificate generation and repository checks |
+| `docs/` | Markdown | API, development, and roadmap documentation |
 
-## Implementation Phases
+## Implemented API surface
 
-| Phase | Duration | Focus |
-|---|---|---|
-| 1 — Foundation | Weeks 1-4 | Agent, control plane, basic scheduler, REST API, C SDK, CLI |
-| 2 — Memory & Storage | Weeks 5-8 | Distributed shared memory, storage, tiering, consistency |
-| 3 — GPU Integration | Weeks 9-12 | VRAM pooling, GPU scheduling, ML model sharding |
-| 4 — Resilience | Weeks 13-16 | Checkpoint/restart, HA, mTLS, RBAC, quotas |
-| 5 — Polish | Weeks 17-20 | Dashboard, tracing, alerting, performance tuning |
+- REST: `GET /health`, `GET /api/v1/nodes`, `GET /metrics`
+- gRPC: `AgentService.Register` and `AgentService.Heartbeat`; the task/memory RPCs are registered but currently acknowledge without performing work
+- CLI: `health`, `status`/`nodes`, `watch`, `version`
 
-## Technology Stack
-
-| Component | Choice | Rationale |
-|---|---|---|
-| Agent | Rust (tokio) | Minimal footprint, memory safety, direct hardware access |
-| Control Plane | Go (gRPC, Raft) | Excellent concurrency, fast iteration, single binary |
-| Wire Protocol | Protobuf + gRPC | Code gen for Go, Rust, Python; streaming support |
-| Networking | UCX (RoCE v2 + TCP) | Mature RDMA library, multi-transport |
-| GPU | CUDA (NVIDIA first) | ML ecosystem dominance |
-| Containers | containerd + OCI hooks | Simple, no K8s dependency for v1 |
-| Metrics | Prometheus | Industry standard |
+See [docs/API.md](docs/API.md) for request and response details.
 
 ## Documentation
 
-- [Architecture & Technology Decisions](ARCHITECTURE.md)
-- [API Reference](docs/API.md) (coming soon)
-- [Development Guide](docs/DEVELOPMENT.md) (coming soon)
+- [Architecture](ARCHITECTURE.md)
+- [API Reference](docs/API.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
-MIT OR Apache-2.0
+Intended license: MIT OR Apache-2.0. License files have not been added to the repository yet.

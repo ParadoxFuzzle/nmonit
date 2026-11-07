@@ -33,5 +33,7 @@ deploy/certs/*.srl
 
 # ===== Misc =====
 *.log
+.env
 .env.local
 .env.*.local
+!.env.example

@@ -1,6 +1,5 @@
 [workspace]
-# Phase 1: only the agent is implemented.
-# network/, storage/, and sdk/rust/ will be added in later phases.
+# Only the agent is implemented. Future crates are added when they exist.
 members = [
     "agent",
 ]

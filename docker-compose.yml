@@ -1,23 +1,20 @@
-# Full nmonit stack — Control Plane + Prometheus + Grafana
+# Development stack — Control Plane + Prometheus + Grafana.
 #
 # Usage:
-#   Development (plaintext, no TLS):
-#     docker compose --profile dev up -d
+#   docker compose --profile dev up -d
 #
-#   Production (TLS + mTLS, requires certs in deploy/certs/):
-#     docker compose --profile prod up -d
+# Production uses the hardened overlay at docker-compose.prod.yml:
+#   cp .env.example .env                 # then replace every value
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d
 #
-#   Generate development certs first:
-#     bash scripts/gen-certs.sh deploy/certs
-#
-# Endpoints:
+# Endpoints (development):
 #   Control plane REST:  http://localhost:8080/health
 #   Control plane gRPC:  localhost:9000
-#   Grafana:             http://localhost:3000  (admin / admin)
+#   Grafana:             http://localhost:3000  (admin / admin — dev only)
 #   Prometheus:          http://localhost:9090
 
 services:
-  # ---- dev profile: plaintext, debug logging ----
+  # ---- dev profile: plaintext, debug logging, no auth ----
   control-plane:
     profiles: ["dev"]
     build:
@@ -34,37 +31,8 @@ services:
       - "--bootstrap"
     restart: unless-stopped
 
-  # ---- prod profile: TLS + mTLS, require-tls ----
-  control-plane-prod:
-    profiles: ["prod"]
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.control-plane
-    container_name: nmonit-control-plane-prod
-    networks:
-      default:
-        aliases:
-          - "control-plane"
-    ports:
-      - "8080:8080"
-      - "9000:9000"
-    volumes:
-      - ./deploy/certs/server.crt:/certs/server.crt:ro
-      - ./deploy/certs/server.key:/certs/server.key:ro
-      - ./deploy/certs/ca.crt:/certs/ca.crt:ro
-    command:
-      - "--grpc-addr=:9000"
-      - "--http-addr=:8080"
-      - "--log-level=info"
-      - "--bootstrap"
-      - "--require-tls"
-      - "--tls-cert=/certs/server.crt"
-      - "--tls-key=/certs/server.key"
-      - "--tls-ca-cert=/certs/ca.crt"
-      - "--tls-reload-interval=30s"
-    restart: unless-stopped
-
   prometheus:
+    profiles: ["dev"]
     image: prom/prometheus:v2.51.0
     container_name: nmonit-prometheus
     ports:
@@ -80,6 +48,7 @@ services:
     restart: unless-stopped
 
   grafana:
+    profiles: ["dev"]
     image: grafana/grafana:10.4.0
     container_name: nmonit-grafana
     ports:
