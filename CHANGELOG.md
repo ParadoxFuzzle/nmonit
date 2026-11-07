@@ -72,7 +72,7 @@ All notable changes to the NMonit project.
 
 ### Changed
 
-- **CI now cancels superseded runs and has per-job timeouts** — Rust formatting is checked and clippy covers all targets.
+- **CI now cancels superseded runs and has per-job timeouts** — Rust formatting is checked, clippy covers all targets, and checkout/setup-go use their Node 24 releases.
 - **Docker Compose dev profile documented correctly** — the development control plane requires `--profile dev`; plain `docker compose up` only starts monitoring.
 - **Proto Go package paths and Cargo repository now match the real module** — `go_package`/`go_package_prefix` point at `github.com/ParadoxFuzzle/control-plane`, and the workspace repository points at `ParadoxFuzzle/nmonit`.
 - **`ClusterId` wire format: hand-rolled v7 → real v4 UUID** — control-plane's prefix `cluster-<id>` is now produced by `github.com/google/uuid.NewString()` (v4). The old hand-rolled `uuid7()` bit layout placed a `7` at `ClusterId[14]` (the UUID version nibble); v4 places a `4` there. Any client that parses the version digit at index 14 to detect UUID variant should be updated accordingly. Same-millisecond ClusterId collisions (the documented bug the v7 helper fell back on) are eliminated.
