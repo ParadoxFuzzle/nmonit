@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"io"
+	"testing"
+)
 
 func TestFormatCPUAndMemory(t *testing.T) {
 	n := node{
@@ -68,5 +71,16 @@ func TestNewHTTPClientRejectsCAOverHTTP(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected --ca-cert over HTTP to be rejected")
+	}
+}
+
+func TestWatchRejectsNonPositiveInterval(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"watch", "--interval", "0s"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected a non-positive watch interval to be rejected")
 	}
 }

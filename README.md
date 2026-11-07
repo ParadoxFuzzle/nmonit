@@ -65,6 +65,7 @@ make
 # Check the control plane from another shell
 ./bin/compute --server http://192.168.1.10:8080 --api-key dev-key health
 ./bin/compute --server http://192.168.1.10:8080 --api-key dev-key status
+./bin/compute --server http://192.168.1.10:8080 --api-key dev-key watch
 ```
 
 The CLI also accepts `NMONIT_SERVER`, `NMONIT_API_KEY`, and `NMONIT_CA_CERT`, and supports `--json` for scripting.

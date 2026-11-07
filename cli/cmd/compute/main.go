@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -102,7 +104,10 @@ type gpuUtilization struct {
 }
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "compute:", err)
 		os.Exit(1)
 	}
@@ -123,7 +128,7 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().DurationVar(&opts.timeout, "timeout", 10*time.Second, "HTTP request timeout")
 	root.PersistentFlags().BoolVar(&opts.jsonOut, "json", false, "Print machine-readable JSON")
 
-	root.AddCommand(newHealthCmd(opts), newStatusCmd(opts), newVersionCmd())
+	root.AddCommand(newHealthCmd(opts), newStatusCmd(opts), newWatchCmd(opts), newVersionCmd())
 	return root
 }
 
@@ -157,17 +162,78 @@ func newStatusCmd(opts *options) *cobra.Command {
 		Short:   "Show registered nodes and their live utilization",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var nodes []node
-			if err := fetchJSON(opts, "/api/v1/nodes", &nodes); err != nil {
+			nodes, err := fetchNodes(opts)
+			if err != nil {
 				return err
 			}
-			if opts.jsonOut {
-				return writeJSON(cmd.OutOrStdout(), nodes)
-			}
-			writeNodeTable(cmd.OutOrStdout(), nodes)
-			return nil
+			return printNodes(cmd.OutOrStdout(), opts, nodes)
 		},
 	}
+}
+
+func newWatchCmd(opts *options) *cobra.Command {
+	var interval time.Duration
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Continuously show registered nodes and their live utilization",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if interval <= 0 {
+				return fmt.Errorf("--interval must be positive")
+			}
+
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			out := cmd.OutOrStdout()
+			for {
+				nodes, err := fetchNodes(opts)
+				if err != nil {
+					return err
+				}
+
+				if opts.jsonOut {
+					// One compact array per refresh keeps the output consumable
+					// as a stream of JSON records.
+					if err := json.NewEncoder(out).Encode(nodes); err != nil {
+						return err
+					}
+				} else {
+					if _, err := fmt.Fprint(out, "\033[H\033[2J"); err != nil {
+						return err
+					}
+					if _, err := fmt.Fprintf(out, "Refreshing every %s — Ctrl+C to exit\n\n", interval); err != nil {
+						return err
+					}
+					writeNodeTable(out, nodes)
+				}
+
+				select {
+				case <-cmd.Context().Done():
+					return nil
+				case <-ticker.C:
+				}
+			}
+		},
+	}
+	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "Refresh interval")
+	return cmd
+}
+
+func fetchNodes(opts *options) ([]node, error) {
+	var nodes []node
+	if err := fetchJSON(opts, "/api/v1/nodes", &nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+func printNodes(w io.Writer, opts *options, nodes []node) error {
+	if opts.jsonOut {
+		return writeJSON(w, nodes)
+	}
+	writeNodeTable(w, nodes)
+	return nil
 }
 
 func newVersionCmd() *cobra.Command {

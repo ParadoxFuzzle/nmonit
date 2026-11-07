@@ -297,7 +297,7 @@ nmonit/
 │   │   └── README.md
 │   └── go/                  # Go client library (planned)
 │       └── README.md
-├── cli/                     # Go CLI (`compute status`, `health`, `version`)
+├── cli/                     # Go CLI (`compute status`, `watch`, `health`, `version`)
 │   ├── cmd/compute/         # CLI entrypoint + REST client
 │   ├── go.mod
 │   └── go.sum

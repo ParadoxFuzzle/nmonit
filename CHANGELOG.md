@@ -49,7 +49,7 @@ All notable changes to the NMonit project.
 ### Added
 
 - **GitHub Actions CI** — `.github/workflows/ci.yml` now runs Go race tests and vet, builds the CLI, runs the Rust tests, and runs `clippy -D warnings`.
-- **`compute` CLI** — `status`, `health`, and `version` commands with API-key auth, optional CA certificate, JSON output, and a node utilization table. Buildable with `make cli` and `deploy/docker/Dockerfile.cli`.
+- **`compute` CLI** — `status`, `watch`, `health`, and `version` commands with API-key auth, optional CA certificate, JSON output, and a node utilization table. Buildable with `make cli` and `deploy/docker/Dockerfile.cli`.
 - **Live node utilization in REST** — `/api/v1/nodes` now includes a `utilization` object with CPU load/percentages, memory usage, and GPU/VRAM/temperature/power/clock data from heartbeats.
 
 ### Fixed
@@ -64,6 +64,7 @@ All notable changes to the NMonit project.
 - **Agent could panic on a poisoned resource mutex** — `discover_resources` now recovers the poisoned guard like `collect_utilization` already did.
 - **Agent Docker build used Rust 1.78** — bumped to Rust 1.95, matching edition 2024 and the `sysinfo` MSRV.
 - **CLI silently ignored `--ca-cert` over HTTP** — it now rejects a CA certificate unless the server URL is `https://`, preventing an API key from being sent in plaintext while TLS was expected.
+- **SIGHUP did not always reload certificates** — the forced reload path now bypasses the unchanged-mtime optimization, so an explicit signal always re-reads the configured files.
 - **CLI hid GPU utilization without static GPU metadata** — utilization rows are now shown even when the resources list is empty.
 - **Heartbeat handler left nodes registered on early returns** — cleanup now runs on every stream exit path, while connection-ID matching protects re-registered nodes.
 - **A wedged heartbeat stream could block the agent loop** — sends are bounded by the heartbeat interval, and missed ticks are skipped instead of bursting afterward.

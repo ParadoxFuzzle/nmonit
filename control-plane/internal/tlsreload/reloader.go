@@ -59,7 +59,7 @@ func New(certPath, keyPath, caCertPath string) (*CertReloader, error) {
 		keyPath:    keyPath,
 		caCertPath: caCertPath,
 	}
-	if err := r.load(); err != nil {
+	if err := r.load(true); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -68,7 +68,10 @@ func New(certPath, keyPath, caCertPath string) (*CertReloader, error) {
 // load reads the certificate, key, and optional CA from disk and replaces
 // the current values under the write lock.  On failure the old values are
 // preserved (so a transient I/O error doesn't cause handshake failures).
-func (r *CertReloader) load() error {
+//
+// When force is false, unchanged modification times skip the expensive
+// certificate/key load. Reload() passes true so SIGHUP always refreshes.
+func (r *CertReloader) load(force bool) error {
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
 
@@ -96,7 +99,7 @@ func (r *CertReloader) load() error {
 		caChanged = !caStat.ModTime().Equal(r.caMod)
 	}
 
-	if !certChanged && !keyChanged && !caChanged {
+	if !force && !certChanged && !keyChanged && !caChanged {
 		return nil // nothing changed
 	}
 
@@ -178,7 +181,7 @@ func (r *CertReloader) GetConfigForClient(_ *tls.ClientHelloInfo) (*tls.Config, 
 // On failure the error is logged (WARN) and the previous certificate
 // continues to be served without interruption.
 func (r *CertReloader) Reload() {
-	if err := r.load(); err != nil {
+	if err := r.load(true); err != nil {
 		metrics.TLSCertLoadTotal.WithLabelValues("failure").Inc()
 		log.Warn().Err(err).Msg("forced certificate reload failed, keeping current cert")
 	}
@@ -199,7 +202,7 @@ func (r *CertReloader) Watch(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := r.load(); err != nil {
+			if err := r.load(false); err != nil {
 				metrics.TLSCertLoadTotal.WithLabelValues("failure").Inc()
 				log.Warn().Err(err).Msg("certificate reload failed, keeping current cert")
 			}
