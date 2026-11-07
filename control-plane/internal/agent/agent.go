@@ -212,6 +212,12 @@ func (s *AgentServer) Register(ctx context.Context, req *computev1.RegisterReque
 	if err := validateAll(ctx, "Register", []validationCheck{
 		newCheck("node_id", func() error { return validator.ValidateNodeID(req.NodeId) }),
 		newCheck("address", func() error { return validator.ValidateAddress(req.Address) }),
+		newCheck("resources", func() error {
+			if req.Resources == nil {
+				return status.Error(codes.InvalidArgument, "resources must not be nil")
+			}
+			return nil
+		}),
 		newCheck("agent_version", func() error { return validator.ValidateVersion(req.AgentVersion) }),
 	}); err != nil {
 		return nil, err
@@ -258,10 +264,16 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 	}
 
 	connID := s.registry.ConnectionID(nodeID)
+	if connID == 0 {
+		log.Warn().Str("node_id", nodeID).Msg("heartbeat stream rejected: node not registered")
+		return status.Errorf(codes.FailedPrecondition, "node %q is not registered; register before opening a heartbeat stream", nodeID)
+	}
 
 	log.Info().Str("node_id", nodeID).Uint64("conn_id", connID).Msg("heartbeat stream opened")
 
-	s.registry.UpdateHeartbeat(first.NodeId, first.Utilization, first.Tasks)
+	if !s.registry.UpdateHeartbeat(nodeID, connID, first.Utilization, first.Tasks) {
+		return status.Errorf(codes.NotFound, "node %q was removed while opening heartbeat stream", nodeID)
+	}
 
 	done := make(chan struct{})
 	defer close(done)
@@ -306,13 +318,20 @@ func (s *AgentServer) Heartbeat(stream computev1.AgentService_HeartbeatServer) e
 		}
 
 		if err := validateAll(stream.Context(), "Heartbeat", []validationCheck{
-			newCheck("node_id", func() error { return validator.ValidateNodeID(req.NodeId) }),
+			newCheck("node_id", func() error {
+				if req.NodeId != nodeID {
+					return status.Errorf(codes.InvalidArgument, "node_id %q does not match stream node %q", req.NodeId, nodeID)
+				}
+				return validator.ValidateNodeID(req.NodeId)
+			}),
 			newCheck("tasks", func() error { return validator.ValidateHeartbeatTaskCount(len(req.Tasks)) }),
 		}); err != nil {
 			return err
 		}
 
-		s.registry.UpdateHeartbeat(req.NodeId, req.Utilization, req.Tasks)
+		if !s.registry.UpdateHeartbeat(nodeID, connID, req.Utilization, req.Tasks) {
+			return status.Errorf(codes.NotFound, "node %q is no longer registered; re-register before continuing", nodeID)
+		}
 
 		log.Debug().
 			Str("node_id", req.NodeId).

@@ -193,6 +193,21 @@ impl HeartbeatManager {
         let (request_tx, request_rx) = mpsc::channel::<HeartbeatRequest>(16);
         let request_stream = ReceiverStream::new(request_rx);
 
+        // The server waits for the first request message before it sends the
+        // response headers. Enqueue the initial heartbeat *before* awaiting
+        // heartbeat(), otherwise both sides wait on each other until the
+        // endpoint timeout fires and the stream never opens.
+        let init_req = HeartbeatRequest {
+            node_id: node_id.clone(),
+            sequence: 0,
+            utilization: None,
+            tasks: vec![],
+        };
+        request_tx
+            .send(init_req)
+            .await
+            .map_err(|_| anyhow::anyhow!("failed to enqueue initial heartbeat"))?;
+
         let mut hb_req = tonic::Request::new(request_stream);
         if let Some(ref token) = agent_token {
             let bearer = MetadataValue::try_from(format!("Bearer {}", token))
@@ -211,21 +226,7 @@ impl HeartbeatManager {
         // main loop falls behind control-plane instruction delivery.
         let (instruction_tx, instruction_rx) = mpsc::channel::<ControlInstruction>(256);
 
-        // --- Step 3: Send the first heartbeat immediately ---
-        // This must happen before the server's Recv() times out.
-        // We send it from the main task, not a spawned delayed task.
-        let init_req = HeartbeatRequest {
-            node_id: node_id.clone(),
-            sequence: 0,
-            utilization: None,
-            tasks: vec![],
-        };
-        request_tx
-            .send(init_req)
-            .await
-            .map_err(|_| anyhow::anyhow!("failed to send initial heartbeat"))?;
-
-        // --- Step 4: Spawn background reader for responses ---
+        // --- Step 3: Spawn background reader for responses ---
         let nid = node_id.clone();
         let task = tokio::spawn(async move {
             loop {

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Go 1.25+** — control plane and CLI
-- **Rust** (stable) — compute agent
+- **Rust 1.95+** — compute agent
 - **Docker + Docker Compose** — containerised stack
 - **OpenSSL** — development TLS certificates
 
@@ -18,7 +18,7 @@ cd nmonit
 bash scripts/gen-certs.sh deploy/certs
 
 # Start the full stack (dev mode — plaintext, no TLS)
-docker compose up -d
+docker compose --profile dev up -d
 
 # Verify
 curl http://localhost:8080/health         # → {"status":"ok"}
@@ -45,7 +45,7 @@ curl http://localhost:9090/api/v1/targets # Prometheus
 ### Development (plaintext, no TLS)
 
 ```bash
-docker compose up -d
+docker compose --profile dev up -d
 ```
 
 The control plane runs with debug logging, no authentication, and no TLS.
@@ -74,15 +74,15 @@ The prod profile:
 
 ```bash
 # Control plane only (local development)
-go run ./control-plane/cmd/control-plane --bootstrap --log-level=debug
+(cd control-plane && go run ./cmd/control-plane --bootstrap --log-level=debug)
 
 # Control plane with TLS
-go run ./control-plane/cmd/control-plane \
+(cd control-plane && go run ./cmd/control-plane \
   --bootstrap \
-  --tls-cert=deploy/certs/server.crt \
-  --tls-key=deploy/certs/server.key \
-  --tls-ca-cert=deploy/certs/ca.crt \
-  --require-tls
+  --tls-cert=../deploy/certs/server.crt \
+  --tls-key=../deploy/certs/server.key \
+  --tls-ca-cert=../deploy/certs/ca.crt \
+  --require-tls)
 
 # Agent (requires a running control plane)
 cargo run -p compute-agent -- \
@@ -152,18 +152,18 @@ On reload failure, the previous cert continues serving — no downtime. The `nmo
 
 ## Useful Commands
 
-All `docker compose` commands default to the dev profile. For production, add
+Use `--profile dev` for the development control plane. For production, add
 `--profile prod` and use `control-plane-prod` as the service name.
 
 ```bash
 # View logs (dev)
-docker compose logs -f control-plane
+docker compose --profile dev logs -f control-plane
 
 # View logs (prod)
 docker compose --profile prod logs -f control-plane-prod
 
 # Rebuild and restart after code changes
-docker compose up -d --build
+docker compose --profile dev up -d --build
 
 # Tear down
 docker compose down

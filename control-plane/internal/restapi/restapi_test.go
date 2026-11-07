@@ -1,6 +1,7 @@
 package restapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -162,6 +163,85 @@ func TestGPUSummary(t *testing.T) {
 	}
 	if got[1].Index != 1 {
 		t.Errorf("expected index 1, got %d", got[1].Index)
+	}
+}
+
+func TestUtilizationSummary_Nil(t *testing.T) {
+	if got := utilizationSummary(nil); got != nil {
+		t.Errorf("expected nil utilization summary, got %#v", got)
+	}
+}
+
+func TestUtilizationSummary(t *testing.T) {
+	got := utilizationSummary(&computev1.NodeUtilization{
+		TimestampNs: 1_000_000_000,
+		Cpu: &computev1.CpuUtilization{
+			OverallPercent: 12.5,
+			PerCorePercent: []float64{10, 15},
+			Load_1M:        1.2,
+			Load_5M:        1.1,
+			Load_15M:       1.0,
+		},
+		Memory: &computev1.MemoryUtilization{
+			UsedBytes:      4 * 1024 * 1024 * 1024,
+			AvailableBytes: 12 * 1024 * 1024 * 1024,
+		},
+		Gpus: []*computev1.GpuUtilization{{
+			Index:              0,
+			GpuPercent:         50,
+			MemoryPercent:      25,
+			VramUsedBytes:      6 * 1024 * 1024 * 1024,
+			VramTotalBytes:     24 * 1024 * 1024 * 1024,
+			TemperatureCelsius: 60,
+			PowerDrawWatts:     100,
+			PowerLimitWatts:    300,
+		}},
+	})
+
+	if got == nil {
+		t.Fatal("expected non-nil utilization summary")
+	}
+	if got.CPU == nil || got.CPU.OverallPercent != 12.5 {
+		t.Fatalf("unexpected CPU summary: %#v", got.CPU)
+	}
+	if got.CPU.Load1 != 1.2 || got.CPU.Load5 != 1.1 || got.CPU.Load15 != 1.0 {
+		t.Errorf("unexpected load averages: %#v", got.CPU)
+	}
+	if got.Memory == nil || got.Memory.UsedGB != 4 || got.Memory.AvailableGB != 12 || got.Memory.TotalGB != 16 {
+		t.Errorf("unexpected memory summary: %#v", got.Memory)
+	}
+	if len(got.GPUs) != 1 || got.GPUs[0].GPUPercent != 50 || got.GPUs[0].VRAMUsedGB != 6 {
+		t.Errorf("unexpected GPU summary: %#v", got.GPUs)
+	}
+}
+
+func TestNodesHandler_IncludesUtilization(t *testing.T) {
+	reg := registry.NewNodeRegistry()
+	reg.Register("node-1", "", &computev1.NodeResources{NodeId: "node-1", Hostname: "worker-1"})
+	reg.UpdateHeartbeat("node-1", reg.ConnectionID("node-1"), &computev1.NodeUtilization{
+		Cpu: &computev1.CpuUtilization{OverallPercent: 33.3},
+	}, nil)
+
+	api := NewAPIServer(reg, "", false)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
+	rec := httptest.NewRecorder()
+	api.NodesHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var got []NodeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(got))
+	}
+	if got[0].Utilization == nil || got[0].Utilization.CPU == nil {
+		t.Fatalf("expected utilization in response, got %#v", got[0].Utilization)
+	}
+	if got[0].Utilization.CPU.OverallPercent != 33.3 {
+		t.Errorf("expected CPU 33.3, got %f", got[0].Utilization.CPU.OverallPercent)
 	}
 }
 

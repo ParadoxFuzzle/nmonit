@@ -72,7 +72,9 @@ func TestNodeRegistry_UpdateHeartbeat(t *testing.T) {
 	oldBeat := reg.nodes["node-1"].LastBeat
 	time.Sleep(10 * time.Millisecond)
 
-	reg.UpdateHeartbeat("node-1", &computev1.NodeUtilization{NodeId: "node-1"}, nil)
+	if !reg.UpdateHeartbeat("node-1", reg.ConnectionID("node-1"), &computev1.NodeUtilization{NodeId: "node-1"}, nil) {
+		t.Error("expected UpdateHeartbeat to report the known node")
+	}
 
 	if !reg.nodes["node-1"].LastBeat.After(oldBeat) {
 		t.Error("expected LastBeat to be updated after heartbeat")
@@ -81,8 +83,10 @@ func TestNodeRegistry_UpdateHeartbeat(t *testing.T) {
 
 func TestNodeRegistry_UpdateHeartbeat_UnknownNode(t *testing.T) {
 	reg := NewNodeRegistry()
-	// Should not panic for unknown node
-	reg.UpdateHeartbeat("nonexistent", &computev1.NodeUtilization{NodeId: "nonexistent"}, nil)
+	// Should not panic for unknown node, and must report that it was not found.
+	if reg.UpdateHeartbeat("nonexistent", 0, &computev1.NodeUtilization{NodeId: "nonexistent"}, nil) {
+		t.Error("expected UpdateHeartbeat to report false for an unknown node")
+	}
 	if len(reg.GetAll()) != 0 {
 		t.Error("expected no nodes registered for unknown heartbeat")
 	}
@@ -96,7 +100,7 @@ func TestNodeRegistry_UpdateHeartbeat_StoresTasks(t *testing.T) {
 		{TaskId: "task-1", State: computev1.TaskState_TASK_STATE_RUNNING},
 		{TaskId: "task-2", State: computev1.TaskState_TASK_STATE_PENDING},
 	}
-	reg.UpdateHeartbeat("node-1", nil, tasks)
+	reg.UpdateHeartbeat("node-1", reg.ConnectionID("node-1"), nil, tasks)
 
 	reg.mu.RLock()
 	node := reg.nodes["node-1"]
@@ -110,16 +114,53 @@ func TestNodeRegistry_UpdateHeartbeat_StoresTasks(t *testing.T) {
 	}
 }
 
+func TestNodeRegistry_UpdateHeartbeat_StoresUtilization(t *testing.T) {
+	reg := NewNodeRegistry()
+	reg.Register("node-1", "", &computev1.NodeResources{NodeId: "node-1"})
+
+	utilization := &computev1.NodeUtilization{
+		NodeId:      "node-1",
+		TimestampNs: 1234,
+		Cpu:         &computev1.CpuUtilization{OverallPercent: 42.5},
+		Gpus:        []*computev1.GpuUtilization{{Index: 0, GpuPercent: 75}},
+	}
+	reg.UpdateHeartbeat("node-1", reg.ConnectionID("node-1"), utilization, nil)
+
+	snapshot := reg.GetAll()
+	if len(snapshot) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(snapshot))
+	}
+	if snapshot[0].Utilization == nil {
+		t.Fatal("expected utilization to be stored")
+	}
+	if got := snapshot[0].Utilization.Cpu.OverallPercent; got != 42.5 {
+		t.Errorf("expected CPU utilization 42.5, got %f", got)
+	}
+
+	// The registry must not retain the request protobuf itself.
+	utilization.Cpu.OverallPercent = 99
+	if got := reg.GetAll()[0].Utilization.Cpu.OverallPercent; got != 42.5 {
+		t.Errorf("stored utilization changed through the caller's pointer: %f", got)
+	}
+
+	// Mutating a snapshot must not affect later snapshots or internal state.
+	snapshot[0].Utilization.Cpu.OverallPercent = 1
+	if got := reg.GetAll()[0].Utilization.Cpu.OverallPercent; got != 42.5 {
+		t.Errorf("stored utilization changed through a snapshot: %f", got)
+	}
+}
+
 func TestNodeRegistry_UpdateHeartbeat_ReplacesTaskMap(t *testing.T) {
 	reg := NewNodeRegistry()
 	reg.Register("node-1", "", &computev1.NodeResources{NodeId: "node-1"})
 
-	reg.UpdateHeartbeat("node-1", nil, []*computev1.TaskStatus{
+	connID := reg.ConnectionID("node-1")
+	reg.UpdateHeartbeat("node-1", connID, nil, []*computev1.TaskStatus{
 		{TaskId: "task-1", State: computev1.TaskState_TASK_STATE_RUNNING},
 		{TaskId: "task-2", State: computev1.TaskState_TASK_STATE_PENDING},
 	})
 
-	reg.UpdateHeartbeat("node-1", nil, []*computev1.TaskStatus{
+	reg.UpdateHeartbeat("node-1", connID, nil, []*computev1.TaskStatus{
 		{TaskId: "task-2", State: computev1.TaskState_TASK_STATE_COMPLETED},
 	})
 
@@ -150,6 +191,22 @@ func TestNodeRegistry_ConnectionID_IncrementsOnReRegister(t *testing.T) {
 
 	if reg.ConnectionID("node-1") != 2 {
 		t.Error("expected ConnectionID 2 after re-registration")
+	}
+}
+
+func TestNodeRegistry_UpdateHeartbeat_RejectsOldConnection(t *testing.T) {
+	reg := NewNodeRegistry()
+	reg.Register("node-1", "", &computev1.NodeResources{NodeId: "node-1"})
+	oldConn := reg.ConnectionID("node-1")
+
+	reg.Register("node-1", "", &computev1.NodeResources{NodeId: "node-1"})
+	newConn := reg.ConnectionID("node-1")
+
+	if reg.UpdateHeartbeat("node-1", oldConn, nil, nil) {
+		t.Error("old heartbeat stream must not update the re-registered node")
+	}
+	if !reg.UpdateHeartbeat("node-1", newConn, nil, nil) {
+		t.Error("current heartbeat stream should update the re-registered node")
 	}
 }
 
@@ -422,7 +479,7 @@ func TestNodeRegistry_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			reg.UpdateHeartbeat("node-1", &computev1.NodeUtilization{NodeId: "node-1"}, nil)
+			reg.UpdateHeartbeat("node-1", reg.ConnectionID("node-1"), &computev1.NodeUtilization{NodeId: "node-1"}, nil)
 		}()
 	}
 

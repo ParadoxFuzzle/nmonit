@@ -297,7 +297,8 @@ nmonit/
 │   │   └── README.md
 │   └── go/                  # Go client library (planned)
 │       └── README.md
-├── cli/                     # CLI tool (Go — placeholder; main.go/cmd/ not yet written)
+├── cli/                     # Go CLI (`compute status`, `health`, `version`)
+│   ├── cmd/compute/         # CLI entrypoint + REST client
 │   ├── go.mod
 │   └── go.sum
 ├── dashboard/               # Web dashboard (future — React/TypeScript)

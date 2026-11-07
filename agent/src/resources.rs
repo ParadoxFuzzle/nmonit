@@ -36,7 +36,9 @@ pub async fn discover_resources(args: &Args) -> anyhow::Result<NodeResources> {
     let cpu;
     let memory;
     {
-        let sys_guard = SYSTEM.lock().expect("SYSTEM mutex poisoned");
+        // Recover from poisoning: a previous refresh panic must not make every
+        // later discovery call panic too (see the same guard in collect_utilization).
+        let sys_guard = SYSTEM.lock().unwrap_or_else(|e| e.into_inner());
         cpu = discover_cpu(&sys_guard);
         memory = discover_memory(&sys_guard);
     } // MutexGuard dropped here before any await

@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/compute-nmonit/control-plane/gen
+      value: github.com/ParadoxFuzzle/control-plane/gen
 plugins:
   # Go: gRPC service stubs + message types
   - remote: buf.build/protocolbuffers/go

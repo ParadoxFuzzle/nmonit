@@ -25,13 +25,14 @@ import (
 
 // NodeResponse is the JSON-shaped view of one registered agent node.
 type NodeResponse struct {
-	NodeID   string        `json:"node_id"`
-	Hostname string        `json:"hostname"`
-	Address  string        `json:"address"`
-	CPU      CPUSummary    `json:"cpu"`
-	Memory   MemorySummary `json:"memory"`
-	GPUs     []GPUSummary  `json:"gpus"`
-	LastBeat string        `json:"last_beat"`
+	NodeID      string              `json:"node_id"`
+	Hostname    string              `json:"hostname"`
+	Address     string              `json:"address"`
+	CPU         CPUSummary          `json:"cpu"`
+	Memory      MemorySummary       `json:"memory"`
+	GPUs        []GPUSummary        `json:"gpus"`
+	Utilization *UtilizationSummary `json:"utilization,omitempty"`
+	LastBeat    string              `json:"last_beat"`
 }
 
 // CPUSummary is the REST-friendly form of a node's CPU resources.
@@ -55,6 +56,44 @@ type GPUSummary struct {
 	VRamGB float64 `json:"vram_gb"`
 }
 
+// UtilizationSummary is the live resource view reported by heartbeats.
+type UtilizationSummary struct {
+	Timestamp string                    `json:"timestamp,omitempty"`
+	CPU       *CPUUtilizationSummary    `json:"cpu,omitempty"`
+	Memory    *MemoryUtilizationSummary `json:"memory,omitempty"`
+	GPUs      []GPUUtilizationSummary   `json:"gpus"`
+}
+
+// CPUUtilizationSummary is the REST-friendly form of live CPU usage.
+type CPUUtilizationSummary struct {
+	OverallPercent float64   `json:"overall_percent"`
+	PerCorePercent []float64 `json:"per_core_percent,omitempty"`
+	Load1          float64   `json:"load_1m"`
+	Load5          float64   `json:"load_5m"`
+	Load15         float64   `json:"load_15m"`
+}
+
+// MemoryUtilizationSummary is the REST-friendly form of live memory usage.
+type MemoryUtilizationSummary struct {
+	UsedGB      float64 `json:"used_gb"`
+	AvailableGB float64 `json:"available_gb"`
+	TotalGB     float64 `json:"total_gb"`
+}
+
+// GPUUtilizationSummary is the REST-friendly form of live GPU usage.
+type GPUUtilizationSummary struct {
+	Index          int     `json:"index"`
+	GPUPercent     float64 `json:"gpu_percent"`
+	MemoryPercent  float64 `json:"memory_percent"`
+	VRAMUsedGB     float64 `json:"vram_used_gb"`
+	VRAMTotalGB    float64 `json:"vram_total_gb"`
+	TemperatureC   int     `json:"temperature_c"`
+	PowerDrawW     int64   `json:"power_draw_w"`
+	PowerLimitW    int64   `json:"power_limit_w"`
+	ClockMHz       int64   `json:"clock_mhz"`
+	MemoryClockMHz int64   `json:"memory_clock_mhz"`
+}
+
 // ============================================================================
 // Mapping helpers
 //
@@ -76,12 +115,16 @@ func cpuSummary(c *computev1.CpuResources) CPUSummary {
 	}
 }
 
+func bytesToGB(bytes uint64) float64 {
+	return float64(bytes) / (1024 * 1024 * 1024)
+}
+
 func memorySummary(m *computev1.MemoryResources) MemorySummary {
 	if m == nil {
 		return MemorySummary{}
 	}
 	return MemorySummary{
-		TotalGB: float64(m.TotalBytes) / (1024 * 1024 * 1024),
+		TotalGB: bytesToGB(m.TotalBytes),
 	}
 }
 
@@ -95,8 +138,52 @@ func gpuSummary(gs []*computev1.GpuResources) []GPUSummary {
 			Index:  int(g.Index),
 			Vendor: g.Vendor,
 			Model:  g.Model,
-			VRamGB: float64(g.VramBytes) / (1024 * 1024 * 1024),
+			VRamGB: bytesToGB(g.VramBytes),
 		}
+	}
+	return out
+}
+
+func utilizationSummary(u *computev1.NodeUtilization) *UtilizationSummary {
+	if u == nil {
+		return nil
+	}
+	out := &UtilizationSummary{
+		GPUs: make([]GPUUtilizationSummary, 0, len(u.Gpus)),
+	}
+	if u.TimestampNs != 0 {
+		out.Timestamp = time.Unix(0, int64(u.TimestampNs)).UTC().Format(time.RFC3339Nano)
+	}
+	if u.Cpu != nil {
+		out.CPU = &CPUUtilizationSummary{
+			OverallPercent: u.Cpu.OverallPercent,
+			PerCorePercent: append([]float64(nil), u.Cpu.PerCorePercent...),
+			Load1:          u.Cpu.Load_1M,
+			Load5:          u.Cpu.Load_5M,
+			Load15:         u.Cpu.Load_15M,
+		}
+	}
+	if u.Memory != nil {
+		total := u.Memory.UsedBytes + u.Memory.AvailableBytes
+		out.Memory = &MemoryUtilizationSummary{
+			UsedGB:      bytesToGB(u.Memory.UsedBytes),
+			AvailableGB: bytesToGB(u.Memory.AvailableBytes),
+			TotalGB:     bytesToGB(total),
+		}
+	}
+	for _, g := range u.Gpus {
+		out.GPUs = append(out.GPUs, GPUUtilizationSummary{
+			Index:          int(g.Index),
+			GPUPercent:     g.GpuPercent,
+			MemoryPercent:  g.MemoryPercent,
+			VRAMUsedGB:     bytesToGB(g.VramUsedBytes),
+			VRAMTotalGB:    bytesToGB(g.VramTotalBytes),
+			TemperatureC:   int(g.TemperatureCelsius),
+			PowerDrawW:     g.PowerDrawWatts,
+			PowerLimitW:    g.PowerLimitWatts,
+			ClockMHz:       g.ClockMhz,
+			MemoryClockMHz: g.MemoryClockMhz,
+		})
 	}
 	return out
 }
@@ -162,13 +249,14 @@ func (a *APIServer) NodesHandler(w http.ResponseWriter, r *http.Request) {
 	out := make([]NodeResponse, 0, len(nodes))
 	for _, n := range nodes {
 		out = append(out, NodeResponse{
-			NodeID:   n.NodeID,
-			Hostname: n.Hostname,
-			Address:  n.Address,
-			CPU:      cpuSummary(n.CPU),
-			Memory:   memorySummary(n.Memory),
-			GPUs:     gpuSummary(n.GPUs),
-			LastBeat: n.LastBeat.Format(time.RFC3339),
+			NodeID:      n.NodeID,
+			Hostname:    n.Hostname,
+			Address:     n.Address,
+			CPU:         cpuSummary(n.CPU),
+			Memory:      memorySummary(n.Memory),
+			GPUs:        gpuSummary(n.GPUs),
+			Utilization: utilizationSummary(n.Utilization),
+			LastBeat:    n.LastBeat.Format(time.RFC3339),
 		})
 	}
 	_ = json.NewEncoder(w).Encode(out)

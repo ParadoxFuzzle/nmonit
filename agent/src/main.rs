@@ -74,6 +74,32 @@ struct Args {
     reconnect_backoff_secs: u64,
 }
 
+/// Build the TLS client config from the CLI flags.
+///
+/// All three credential paths are required for mTLS.  A partial configuration
+/// is rejected instead of silently falling back to plaintext, which would be a
+/// dangerous surprise for an operator who supplied a certificate path.
+fn build_tls_config(args: &Args) -> anyhow::Result<Option<heartbeat::TlsConfig>> {
+    match (&args.tls_ca_cert, &args.tls_cert, &args.tls_key) {
+        (Some(ca), Some(cert), Some(key)) => {
+            if !args.control_plane.starts_with("https://") {
+                anyhow::bail!("TLS credentials require an https:// control-plane URL");
+            }
+            Ok(Some(heartbeat::TlsConfig {
+                ca_cert_path: ca.clone(),
+                cert_path: cert.clone(),
+                key_path: key.clone(),
+                domain_name: Some(args.tls_domain.clone()),
+            }))
+        }
+        (None, None, None) => {
+            tracing::warn!("TLS not configured — connecting with plaintext (insecure)");
+            Ok(None)
+        }
+        _ => anyhow::bail!("--tls-ca-cert, --tls-cert and --tls-key must be supplied together"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -119,19 +145,7 @@ async fn main() -> anyhow::Result<()> {
         Some(args.agent_token.clone())
     };
 
-    // Build TLS config if cert paths are provided.
-    let tls_config = match (&args.tls_ca_cert, &args.tls_cert, &args.tls_key) {
-        (Some(ca), Some(cert), Some(key)) => Some(heartbeat::TlsConfig {
-            ca_cert_path: ca.clone(),
-            cert_path: cert.clone(),
-            key_path: key.clone(),
-            domain_name: Some(args.tls_domain.clone()),
-        }),
-        _ => {
-            tracing::warn!("TLS not configured — connecting with plaintext (insecure)");
-            None
-        }
-    };
+    let tls_config = build_tls_config(&args)?;
 
     loop {
         attempt += 1;
@@ -246,5 +260,60 @@ async fn main() -> anyhow::Result<()> {
 
         // Exponential backoff with cap
         backoff = (backoff * 2).min(max_backoff);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args_with(extra: &[&str]) -> Args {
+        let mut argv = vec!["compute-agent"];
+        argv.extend_from_slice(extra);
+        Args::try_parse_from(argv).expect("test arguments should parse")
+    }
+
+    #[test]
+    fn test_tls_config_none_when_all_paths_absent() {
+        assert!(build_tls_config(&args_with(&[])).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_tls_config_rejects_partial_paths() {
+        let args = args_with(&["--tls-ca-cert", "ca.pem"]);
+        assert!(build_tls_config(&args).is_err());
+    }
+
+    #[test]
+    fn test_tls_config_accepts_complete_mtls_paths() {
+        let args = args_with(&[
+            "--control-plane",
+            "https://localhost:9000",
+            "--tls-ca-cert",
+            "ca.pem",
+            "--tls-cert",
+            "agent.pem",
+            "--tls-key",
+            "agent.key",
+        ]);
+        let cfg = build_tls_config(&args)
+            .unwrap()
+            .expect("expected TLS config");
+        assert_eq!(cfg.ca_cert_path, "ca.pem");
+        assert_eq!(cfg.cert_path, "agent.pem");
+        assert_eq!(cfg.key_path, "agent.key");
+    }
+
+    #[test]
+    fn test_tls_config_requires_https_url() {
+        let args = args_with(&[
+            "--tls-ca-cert",
+            "ca.pem",
+            "--tls-cert",
+            "agent.pem",
+            "--tls-key",
+            "agent.key",
+        ]);
+        assert!(build_tls_config(&args).is_err());
     }
 }

@@ -13,7 +13,7 @@ RED    := \033[0;31m
 NC     := \033[0m # No Color
 
 .PHONY: all
-all: proto agent control-plane ## Build everything
+all: proto agent control-plane cli ## Build everything
 
 # ============================================================================
 # Protobuf
@@ -92,15 +92,19 @@ control-plane-lint: ## Lint control plane code (go vet + nullable staticcheck + 
 cli: ## Build the CLI tool
 	@echo "$(GREEN)[cli]$(NC) Building..."
 	mkdir -p $(PROJECT_ROOT)/bin
-	cd $(PROJECT_ROOT)/cli && go build -o $(PROJECT_ROOT)/bin/compute ./...
+	cd $(PROJECT_ROOT)/cli && go build -o $(PROJECT_ROOT)/bin/compute ./cmd/compute
 	@echo "$(GREEN)[cli]$(NC) Binary: bin/compute"
+
+.PHONY: cli-test
+cli-test: ## Run CLI tests
+	cd $(PROJECT_ROOT)/cli && go test -race -count=1 ./...
 
 # ============================================================================
 # Testing
 # ============================================================================
 
 .PHONY: test
-test: agent-test control-plane-test ## Run all tests
+test: agent-test control-plane-test cli-test ## Run all tests
 
 .PHONY: check-dead-symbols
 check-dead-symbols: ## Scan the repo for re-referenced removed symbols (catalog: scripts/dead-symbols.json)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
+	"github.com/ParadoxFuzzle/control-plane/internal/registry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -90,6 +92,43 @@ func TestCheckAuth_WrongPrefix(t *testing.T) {
 	}
 	if st.Code() != codes.PermissionDenied {
 		t.Errorf("expected PermissionDenied for wrong prefix, got %v", st.Code())
+	}
+}
+
+func TestRegister_RejectsNilResources(t *testing.T) {
+	reg := registry.NewNodeRegistry()
+	s := NewAgentServer(reg, "cluster-test", "localhost:9000", "")
+
+	_, err := s.Register(context.Background(), &computev1.RegisterRequest{
+		NodeId:       "node-1",
+		AgentVersion: "0.1.0",
+	})
+
+	if got := status.Code(err); got != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for nil resources, got %v (err=%v)", got, err)
+	}
+	if got := len(reg.GetAll()); got != 0 {
+		t.Fatalf("expected no registered node after rejected registration, got %d", got)
+	}
+}
+
+func TestRegister_AcceptsResources(t *testing.T) {
+	reg := registry.NewNodeRegistry()
+	s := NewAgentServer(reg, "cluster-test", "localhost:9000", "")
+
+	resp, err := s.Register(context.Background(), &computev1.RegisterRequest{
+		NodeId:       "node-1",
+		AgentVersion: "0.1.0",
+		Resources:    &computev1.NodeResources{NodeId: "node-1", Hostname: "worker-1"},
+	})
+	if err != nil {
+		t.Fatalf("expected successful registration, got: %v", err)
+	}
+	if !resp.Accepted {
+		t.Error("expected registration to be accepted")
+	}
+	if got := len(reg.GetAll()); got != 1 {
+		t.Fatalf("expected one registered node, got %d", got)
 	}
 }
 

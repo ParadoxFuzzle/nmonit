@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go-control-plane:
+    name: Go control plane
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: control-plane/go.mod
+          cache-dependency-path: control-plane/go.sum
+      - name: Race tests
+        run: go test -race -count=1 ./...
+      - name: Vet
+        run: go vet ./...
+
+  go-cli:
+    name: Go CLI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Race tests
+        run: go test -race -count=1 ./...
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+
+  rust-agent:
+    name: Rust agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test -p compute-agent
+      - name: Clippy
+        run: cargo clippy -p compute-agent -- -D warnings

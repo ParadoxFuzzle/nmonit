@@ -46,26 +46,28 @@ Application (SDK/CLI/REST)
 - **All nodes:** Linux kernel 5.15+, systemd
 - **GPU nodes:** NVIDIA drivers 535+, NVML
 - **RDMA (optional):** RDMA-capable NICs (Mellanox ConnectX-4+, RoCE v2)
-- **Build tools:** Rust 1.80+, Go 1.22+, Protocol Buffers (buf)
+- **Build tools:** Rust 1.95+, Go 1.25+, Protocol Buffers (buf)
 
-### Quick Start (Coming Soon)
+### Quick Start
+
+The control plane, agent registration/heartbeats, and the read-only `compute` CLI work today. Job submission is still under construction.
 
 ```bash
-# Build everything
+# Build the control plane, agent, and CLI
 make
 
 # Start the control plane (first node)
-./bin/control-plane --bootstrap
+./bin/control-plane --bootstrap --api-key dev-key
 
 # Start node agents on each machine
-./bin/compute-agent --control-plane 192.168.1.10:9000
+./target/release/compute-agent --control-plane 192.168.1.10:9000
 
-# Submit a job
-./bin/compute submit --gpus 2 --vram 24G my-job.py
-
-# Check cluster status
-./bin/compute status
+# Check the control plane from another shell
+./bin/compute --server http://192.168.1.10:8080 --api-key dev-key health
+./bin/compute --server http://192.168.1.10:8080 --api-key dev-key status
 ```
+
+The CLI also accepts `NMONIT_SERVER`, `NMONIT_API_KEY`, and `NMONIT_CA_CERT`, and supports `--json` for scripting.
 
 ## Project Structure
 

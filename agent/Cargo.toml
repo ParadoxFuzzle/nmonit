@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-tonic = { version = "0.14", features = ["tls-native-roots"] }
+tonic = { version = "0.14", features = ["tls-native-roots", "tls-ring"] }
 tonic-prost = "0.14"
 prost = "0.14"
 nvml-wrapper = "0.12"

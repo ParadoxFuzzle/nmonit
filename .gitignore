@@ -3,7 +3,8 @@ target/
 *.rs.bk
 
 # ===== Go =====
-# Compiled control-plane binary
+# Build output (control-plane, compute CLI)
+bin/
 control-plane/control-plane
 *.test
 *.out

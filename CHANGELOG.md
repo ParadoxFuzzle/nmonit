@@ -46,8 +46,28 @@ All notable changes to the NMonit project.
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub Actions CI** — `.github/workflows/ci.yml` now runs Go race tests and vet, builds the CLI, runs the Rust tests, and runs `clippy -D warnings`.
+- **`compute` CLI** — `status`, `health`, and `version` commands with API-key auth, optional CA certificate, JSON output, and a node utilization table. Buildable with `make cli` and `deploy/docker/Dockerfile.cli`.
+- **Live node utilization in REST** — `/api/v1/nodes` now includes a `utilization` object with CPU load/percentages, memory usage, and GPU/VRAM/temperature/power/clock data from heartbeats.
+
+### Fixed
+
+- **Heartbeat stream never opened** — the agent awaited the bidirectional `Heartbeat` call before sending its first message, while the server waited for that message before returning response headers. The stream timed out after 10s and no heartbeats were delivered. The initial request is now queued before opening the stream.
+- **mTLS panicked during startup** — `tonic` was compiled with native roots but no rustls crypto provider. Enabled the `tls-ring` feature so the agent can install a provider.
+- **Control-plane crash on nil registration resources** — `Register` now rejects a nil `NodeResources` with `InvalidArgument` before it reaches the registry.
+- **Heartbeat streams could outlive registration state** — unregistered nodes, mismatched node IDs, and stale connection IDs are now rejected, and a removed node receives `NotFound` instead of silently accepting updates.
+- **TLS hot-reload race and missing ALPN** — reload work is serialized, and `GetConfigForClient` advertises `h2` so gRPC handshakes continue to work after reload.
+- **SIGTERM could hang on active heartbeat streams** — gRPC graceful shutdown is bounded to 5s, then forced to stop.
+- **Development certificates failed hostname verification** — generated server certs now carry SANs for `control-plane`, `localhost`, `127.0.0.1`, and `::1`, plus server/client EKU and CA constraints.
+- **Agent could panic on a poisoned resource mutex** — `discover_resources` now recovers the poisoned guard like `collect_utilization` already did.
+- **Agent Docker build used Rust 1.78** — bumped to Rust 1.95, matching edition 2024 and the `sysinfo` MSRV.
+
 ### Changed
 
+- **Docker Compose dev profile documented correctly** — the development control plane requires `--profile dev`; plain `docker compose up` only starts monitoring.
+- **Proto Go package paths and Cargo repository now match the real module** — `go_package`/`go_package_prefix` point at `github.com/ParadoxFuzzle/control-plane`, and the workspace repository points at `ParadoxFuzzle/nmonit`.
 - **`ClusterId` wire format: hand-rolled v7 → real v4 UUID** — control-plane's prefix `cluster-<id>` is now produced by `github.com/google/uuid.NewString()` (v4). The old hand-rolled `uuid7()` bit layout placed a `7` at `ClusterId[14]` (the UUID version nibble); v4 places a `4` there. Any client that parses the version digit at index 14 to detect UUID variant should be updated accordingly. Same-millisecond ClusterId collisions (the documented bug the v7 helper fell back on) are eliminated.
 
 ---

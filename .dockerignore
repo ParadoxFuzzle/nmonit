@@ -1,15 +1,13 @@
-# Only control-plane/ is needed for the Docker build — exclude everything else
-# to keep the build context small and avoid cache invalidation from irrelevant
-# file changes.
+# Only control-plane/ and cli/ are needed for the Docker builds — exclude
+# everything else to keep the build context small and avoid cache invalidation
+# from irrelevant file changes.
 
 # Rust crates (agent, storage, network)
 agent/
 storage/
 network/
 
-# Other Go components
-cli/
-
+# cli/ is intentionally included: Dockerfile.cli builds from it.
 # Protobuf definitions
 proto/
 

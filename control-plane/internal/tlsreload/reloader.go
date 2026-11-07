@@ -29,6 +29,10 @@ import (
 type CertReloader struct {
 	mu sync.RWMutex
 
+	// reloadMu serializes load() calls so the mod-time bookkeeping below is
+	// not read and written concurrently by Watch and a SIGHUP-triggered Reload.
+	reloadMu sync.Mutex
+
 	cert         *tls.Certificate
 	clientCAPool *x509.CertPool
 	hasCA        bool
@@ -65,6 +69,9 @@ func New(certPath, keyPath, caCertPath string) (*CertReloader, error) {
 // the current values under the write lock.  On failure the old values are
 // preserved (so a transient I/O error doesn't cause handshake failures).
 func (r *CertReloader) load() error {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+
 	// Check file modification times — skip reload if nothing changed.
 	certStat, err := os.Stat(r.certPath)
 	if err != nil {
@@ -154,6 +161,10 @@ func (r *CertReloader) GetConfigForClient(_ *tls.ClientHelloInfo) (*tls.Config, 
 	cfg := &tls.Config{
 		Certificates: []tls.Certificate{*r.cert},
 		MinVersion:   tls.VersionTLS13,
+		// gRPC requires HTTP/2.  Returning a fresh config from
+		// GetConfigForClient replaces the one grpc-go prepared, so the ALPN
+		// protocol must be set here as well.
+		NextProtos: []string{"h2"},
 	}
 	if r.hasCA {
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert

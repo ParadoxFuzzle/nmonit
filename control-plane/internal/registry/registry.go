@@ -28,16 +28,18 @@ type NodeInfo struct {
 	NodeID       string
 	Address      string
 	Resources    *computev1.NodeResources
+	Utilization  *computev1.NodeUtilization
 	LastBeat     time.Time
 	Tasks        map[string]*computev1.TaskStatus
 	ConnectionID uint64 // Monotonic counter; heartbeat stream validates against this
 }
 
 // NodeSummary is the read-only, transport-friendly view of a registered node
-// returned by GetAll. Proto fields are deep-cloned via proto.Clone on each call
-// so callers cannot mutate registry state by holding onto the returned
-// structs. The Tasks map (and any internal bookkeeping it implies) is kept
-// solely on NodeInfo and is intentionally omitted here.
+// returned by GetAll. Proto fields, including the latest utilization sample,
+// are deep-cloned via proto.Clone on each call so callers cannot mutate
+// registry state by holding onto the returned structs. The Tasks map (and any
+// internal bookkeeping it implies) is kept solely on NodeInfo and is
+// intentionally omitted here.
 type NodeSummary struct {
 	NodeID       string
 	Hostname     string
@@ -46,6 +48,7 @@ type NodeSummary struct {
 	CPU          *computev1.CpuResources
 	Memory       *computev1.MemoryResources
 	GPUs         []*computev1.GpuResources
+	Utilization  *computev1.NodeUtilization
 	ConnectionID uint64
 }
 
@@ -96,11 +99,20 @@ func (r *NodeRegistry) Register(nodeID string, addr string, res *computev1.NodeR
 // UpdateHeartbeat refreshes LastBeat on a node and replaces its task map with
 // the agent's current view. Replacing (not appending) prevents unbound memory
 // growth from accumulating completed tasks.
-func (r *NodeRegistry) UpdateHeartbeat(nodeID string, _ *computev1.NodeUtilization, tasks []*computev1.TaskStatus) {
+//
+// It returns false when the node is no longer registered or the stream's
+// connection ID is stale. Callers must treat that as a request to re-register
+// rather than silently continuing to send heartbeats into a removed node.
+func (r *NodeRegistry) UpdateHeartbeat(nodeID string, connID uint64, utilization *computev1.NodeUtilization, tasks []*computev1.TaskStatus) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if n, ok := r.nodes[nodeID]; ok {
+	found := false
+	if n, ok := r.nodes[nodeID]; ok && n.ConnectionID == connID {
+		found = true
 		n.LastBeat = time.Now()
+		if utilization != nil {
+			n.Utilization = proto.CloneOf[*computev1.NodeUtilization](utilization)
+		}
 		n.Tasks = make(map[string]*computev1.TaskStatus, len(tasks))
 		for _, t := range tasks {
 			n.Tasks[t.TaskId] = t
@@ -108,13 +120,14 @@ func (r *NodeRegistry) UpdateHeartbeat(nodeID string, _ *computev1.NodeUtilizati
 	}
 	metrics.HeartbeatsTotal.Inc()
 	metrics.TasksRunning.Set(float64(r.totalTasksLocked()))
+	return found
 }
 
 // GetAll returns a deep-copied snapshot of the registered nodes as NodeSummary.
 //
-// The CPU/Memory/GPUs proto fields are cloned via proto.Clone on each call
-// so no caller-held reference points back into registry.nodes. The internal
-// Tasks map is intentionally not exposed here.
+// The CPU/Memory/GPUs and utilization proto fields are cloned via proto.Clone
+// on each call so no caller-held reference points back into registry.nodes.
+// The internal Tasks map is intentionally not exposed here.
 //
 // GetAll is safe under concurrent Register / UpdateHeartbeat because it holds
 // r.mu.RLock for the duration of the copy. RLock allows multiple concurrent
@@ -135,6 +148,10 @@ func (r *NodeRegistry) GetAll() []NodeSummary {
 			mem = cl.Memory
 			gpus = cl.Gpus
 		}
+		var utilization *computev1.NodeUtilization
+		if v.Utilization != nil {
+			utilization = proto.CloneOf[*computev1.NodeUtilization](v.Utilization)
+		}
 		out = append(out, NodeSummary{
 			NodeID:       v.NodeID,
 			Hostname:     hostname,
@@ -143,6 +160,7 @@ func (r *NodeRegistry) GetAll() []NodeSummary {
 			CPU:          cpu,
 			Memory:       mem,
 			GPUs:         gpus,
+			Utilization:  utilization,
 			ConnectionID: v.ConnectionID,
 		})
 	}

@@ -97,6 +97,9 @@ func main() {
 	var tlsEnabled bool
 	switch {
 	case *tlsCert == "" && *tlsKey == "":
+		if *tlsCACert != "" {
+			log.Fatal().Msg("--tls-ca-cert requires --tls-cert and --tls-key")
+		}
 		if *requireTLS {
 			log.Fatal().Msg("--require-tls is set but no TLS credentials were provided; refusing to start with plaintext")
 		}
@@ -225,7 +228,21 @@ shutdown:
 		}
 	}
 
-	grpcServer.GracefulStop()
+	// Heartbeat RPCs are long-lived streams.  A plain GracefulStop would wait
+	// forever for agents that keep their stream open, so bound the grace period
+	// and force-close any remaining connections afterwards.
+	grpcStopped := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(grpcStopped)
+	}()
+	select {
+	case <-grpcStopped:
+	case <-time.After(5 * time.Second):
+		log.Warn().Msg("gRPC graceful shutdown timed out; forcing stop")
+		grpcServer.Stop()
+		<-grpcStopped
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
