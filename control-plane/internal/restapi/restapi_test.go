@@ -66,6 +66,23 @@ func TestRequireAPIKey_ValidHeader(t *testing.T) {
 	}
 }
 
+func TestRequireAPIKey_ValidBearerHeader(t *testing.T) {
+	api := NewAPIServer(registry.NewNodeRegistry(), "my-api-key", false)
+	called := false
+	handler := api.RequireAPIKey(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer my-api-key")
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if !called {
+		t.Error("expected handler to be called with valid Bearer header")
+	}
+}
+
 func TestRequireAPIKey_ValidQueryParam(t *testing.T) {
 	api := NewAPIServer(registry.NewNodeRegistry(), "my-api-key", false)
 	called := false

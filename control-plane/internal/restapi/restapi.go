@@ -13,6 +13,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	computev1 "github.com/ParadoxFuzzle/control-plane/gen/compute/v1"
@@ -216,14 +217,22 @@ func NewAPIServer(reg *registry.NodeRegistry, apiKey string, tlsEnabled bool) *A
 	}
 }
 
-// RequireAPIKey is the X-API-Key middleware. Accepts the key from either the
-// X-API-Key header or the api_key query parameter, and compares against the
-// configured key with constant-time equality. If no key is configured, all
-// requests are allowed.
+// RequireAPIKey is the API-key middleware. It accepts the key from the
+// X-API-Key header, an Authorization: Bearer header (used by Prometheus), or
+// the legacy api_key query parameter, and compares it against the configured
+// key with constant-time equality. If no key is configured, all requests are
+// allowed.
 func (a *APIServer) RequireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if a.apiKey != "" {
 			key := r.Header.Get("X-API-Key")
+			if key == "" {
+				const bearerPrefix = "Bearer "
+				auth := r.Header.Get("Authorization")
+				if len(auth) > len(bearerPrefix) && strings.EqualFold(auth[:len(bearerPrefix)], bearerPrefix) {
+					key = strings.TrimSpace(auth[len(bearerPrefix):])
+				}
+			}
 			if key == "" {
 				key = r.URL.Query().Get("api_key")
 			}

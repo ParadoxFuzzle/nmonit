@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -38,6 +39,10 @@ type options struct {
 	caCert  string
 	timeout time.Duration
 	jsonOut bool
+
+	clientOnce sync.Once
+	client     *http.Client
+	clientErr  error
 }
 
 type node struct {
@@ -262,7 +267,7 @@ func fetchJSON(opts *options, path string, out any) error {
 		req.Header.Set("X-API-Key", opts.apiKey)
 	}
 
-	client, err := newHTTPClient(opts)
+	client, err := opts.httpClient()
 	if err != nil {
 		return err
 	}
@@ -294,6 +299,16 @@ func fetchJSON(opts *options, path string, out any) error {
 		return fmt.Errorf("decode %s: %w", path, err)
 	}
 	return nil
+}
+
+// httpClient lazily builds one client per command invocation. Reusing the
+// client (and its transport) lets watch keep a small pool of connections
+// instead of creating a new idle transport on every refresh.
+func (o *options) httpClient() (*http.Client, error) {
+	o.clientOnce.Do(func() {
+		o.client, o.clientErr = newHTTPClient(o)
+	})
+	return o.client, o.clientErr
 }
 
 func newHTTPClient(opts *options) (*http.Client, error) {

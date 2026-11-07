@@ -64,6 +64,22 @@ func TestFormatGPUsWithoutStaticResources(t *testing.T) {
 	}
 }
 
+func TestHTTPClientReused(t *testing.T) {
+	opts := &options{server: "http://localhost:8080"}
+
+	first, err := opts.httpClient()
+	if err != nil {
+		t.Fatalf("first httpClient: %v", err)
+	}
+	second, err := opts.httpClient()
+	if err != nil {
+		t.Fatalf("second httpClient: %v", err)
+	}
+	if first != second {
+		t.Error("expected the same HTTP client to be reused across calls")
+	}
+}
+
 func TestNewHTTPClientRejectsCAOverHTTP(t *testing.T) {
 	_, err := newHTTPClient(&options{
 		server: "http://localhost:8080",

@@ -3,11 +3,11 @@
 /// Runs on every node in the cluster. Phase 1 responsibilities:
 /// - Hardware resource discovery and reporting
 /// - Heartbeat / health reporting to control plane
-/// - GPU memory management
+/// - GPU inventory and utilization reporting
 ///
-/// Higher-level concerns (task execution, distributed memory, metrics
-/// collection, mDNS discovery, RDMA transport) are planned for later
-/// phases — see ARCHITECTURE.md.
+/// Higher-level concerns (task execution, distributed memory, mDNS
+/// discovery, RDMA transport) are planned for later phases — see
+/// ARCHITECTURE.md and docs/ROADMAP.md.
 use clap::Parser;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
@@ -100,6 +100,46 @@ fn build_tls_config(args: &Args) -> anyhow::Result<Option<heartbeat::TlsConfig>>
     }
 }
 
+/// Resolve when the process receives SIGINT or SIGTERM.
+///
+/// The future is created once and polled around connection attempts, backoff,
+/// and live-stream handling, so systemd and container shutdowns are honored in
+/// every state instead of only while a heartbeat stream is connected.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(signal) => signal,
+                Err(err) => {
+                    tracing::error!(error = %err, "failed to install SIGTERM handler");
+                    if let Err(err) = tokio::signal::ctrl_c().await {
+                        tracing::error!(error = %err, "failed to wait for Ctrl+C");
+                    }
+                    return;
+                }
+            };
+
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if let Err(err) = result {
+                    tracing::error!(error = %err, "failed to wait for Ctrl+C");
+                }
+            }
+            _ = sigterm.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %err, "failed to wait for Ctrl+C");
+        }
+    }
+
+    tracing::info!("shutdown signal received");
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -147,17 +187,23 @@ async fn main() -> anyhow::Result<()> {
 
     let tls_config = build_tls_config(&args)?;
 
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+
     loop {
         attempt += 1;
 
-        match heartbeat::HeartbeatManager::connect(
-            args.control_plane.clone(),
-            resources.clone(),
-            agent_token.clone(),
-            tls_config.clone(),
-        )
-        .await
-        {
+        let connect_result = tokio::select! {
+            _ = &mut shutdown => return Ok(()),
+            result = heartbeat::HeartbeatManager::connect(
+                args.control_plane.clone(),
+                resources.clone(),
+                agent_token.clone(),
+                tls_config.clone(),
+            ) => result,
+        };
+
+        match connect_result {
             Ok(mut conn) => {
                 // Reset reconnection state on successful connection
                 attempt = 0;
@@ -241,10 +287,7 @@ async fn main() -> anyhow::Result<()> {
                         }
 
                         // --- Shutdown signal ---
-                        _ = tokio::signal::ctrl_c() => {
-                            tracing::info!("shutdown signal received");
-                            return Ok(());
-                        }
+                        _ = &mut shutdown => return Ok(()),
                     }
                 };
 
@@ -275,7 +318,10 @@ async fn main() -> anyhow::Result<()> {
             attempt,
             "reconnecting to control plane"
         );
-        tokio::time::sleep(backoff).await;
+        tokio::select! {
+            _ = &mut shutdown => return Ok(()),
+            _ = tokio::time::sleep(backoff) => {}
+        }
 
         // Exponential backoff with cap
         backoff = (backoff * 2).min(max_backoff);
